@@ -1,0 +1,6 @@
+Django==6.1
+djangorestframework==3.18.0
+psycopg[binary]==3.3.4
+django-cors-headers==4.9.0
+argon2-cffi==25.1.0
+python-dotenv==1.2.3

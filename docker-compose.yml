@@ -1,0 +1,22 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: campus_manager_django_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:-postgres_dev_only}
+      POSTGRES_DB: campus_manager_django
+    ports:
+      # Port dédié pour ne jamais entrer en conflit avec le backend NestJS
+      # (backend/, port hôte 5434, dépôt distinct de votre coéquipier).
+      - "5436:5432"
+    volumes:
+      - campus_manager_django_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d campus_manager_django"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  campus_manager_django_pgdata:
