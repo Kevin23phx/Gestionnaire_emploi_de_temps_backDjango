@@ -5,8 +5,16 @@ from core.utils import generate_id
 
 
 class Role(models.TextChoices):
-    ETUDIANT = "etudiant"
-    ENSEIGNANT = "enseignant"
+    """[V3] INV-03 / RM-03 : deux rôles, et deux seulement.
+
+    "etudiant" et "enseignant" ont été retirés le 2026-09-07 : le programme
+    étant désormais public (FR-PUB-01), il n'y a plus rien à ouvrir derrière
+    un compte pour eux. Les *entités* Etudiant et Enseignant, elles,
+    demeurent au référentiel — un créneau porte toujours un enseignant
+    (INV-01) et l'effectif d'un groupe alimente toujours le conflit de
+    capacité (RM-02).
+    """
+
     SCOLARITE = "scolarite"
     ADMIN = "admin"
 
@@ -42,7 +50,15 @@ class Utilisateur(models.Model):
     """Un compte a exactement un rôle, jamais choisi par le client (INV-03).
     "mot_de_passe_hash" absent/null = compte pré-provisionné, pas encore
     activé (FR-AUTH-03). "ufr_id" non-null SSI role="scolarite" (INV-10),
-    appliqué par une contrainte CHECK en base (voir la migration)."""
+    appliqué par une contrainte CHECK en base (voir la migration).
+
+    [V3] Les relations vers Etudiant et Enseignant ont été retirées le
+    2026-09-07 avec les rôles correspondants : un compte n'est plus jamais
+    la doublure d'une fiche de référentiel, il est toujours un compte de
+    gestion. C'est ce qui rend INT-02 (aucun compte hors création par
+    l'Admin) vérifiable d'un coup d'œil : `ufr/services.py` est le seul
+    endroit du code qui crée un Utilisateur.
+    """
 
     id = models.CharField(primary_key=True, max_length=64, default=generate_id, editable=False)
     identifiant = models.CharField(max_length=255, unique=True)
@@ -53,12 +69,6 @@ class Utilisateur(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     ufr = models.ForeignKey(Ufr, related_name="gestionnaires", on_delete=models.PROTECT, null=True, blank=True)
-    etudiant = models.OneToOneField(
-        "referentiel.Etudiant", related_name="utilisateur", on_delete=models.CASCADE, null=True, blank=True
-    )
-    enseignant = models.OneToOneField(
-        Enseignant, related_name="utilisateur", on_delete=models.CASCADE, null=True, blank=True
-    )
 
     class Meta:
         db_table = "utilisateur"

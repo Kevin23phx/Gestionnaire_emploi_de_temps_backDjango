@@ -22,17 +22,25 @@ class StructureGestionnaire(models.TextChoices):
 
 
 class Groupe(models.Model):
-    """"effectif" n'est jamais une colonne : toujours calculé (COUNT(Etudiant)).
-    "annee_academique" (FR-REF-12) : année EN COURS de CE groupe précis,
-    distincte d'Etudiant.annee_academique (année d'inscription, immuable) —
-    une promotion se fait en créant un nouveau Groupe, jamais en modifiant
-    celui-ci sur place."""
+    """"annee_academique" (FR-REF-12) : année EN COURS de CE groupe précis.
+    Une promotion se fait en créant un nouveau Groupe, jamais en modifiant
+    celui-ci sur place.
+
+    [V3.1, 2026-09-07] "effectif" est désormais une COLONNE, saisie par le
+    Gestionnaire. Il était auparavant calculé (COUNT(Etudiant)), ce qui
+    supposait de tenir à jour la liste nominative des inscrits de chaque
+    groupe — un travail d'import considérable pour une seule valeur
+    réellement consommée : le nombre, comparé à la capacité d'une salle
+    (RM-02). Le référentiel des étudiants a donc été supprimé au profit de
+    ce champ. Conséquence assumée : l'effectif n'est plus vérifiable par le
+    système, il vaut ce que le Gestionnaire a saisi."""
 
     id = models.CharField(primary_key=True, max_length=64, default=generate_id, editable=False)
     nom = models.CharField(max_length=255)
     filiere = models.CharField(max_length=255)
     niveau = models.CharField(max_length=32)
     annee_academique = models.CharField(max_length=16)
+    effectif = models.PositiveIntegerField(default=0)
 
     ufr = models.ForeignKey(Ufr, related_name="groupes", on_delete=models.PROTECT)
 
@@ -45,39 +53,6 @@ class Groupe(models.Model):
 
     def __str__(self) -> str:
         return self.nom
-
-
-class Etudiant(models.Model):
-    """Distinct de Utilisateur pour la même raison qu'Enseignant en est
-    distinct : la scolarité doit pouvoir rattacher un étudiant à un groupe
-    avant même que son compte existe. "annee_academique" (FR-REF-09) : année
-    d'inscription, immuable — sert au filtrage (FR-REF-11), jamais à
-    assouplir l'unicité de l'INE (FR-REF-08). "ufr_id" (INV-09) : toujours
-    rattaché à exactement une UFR ; changement réservé à l'Admin
-    (FR-ADMIN-05)."""
-
-    id = models.CharField(primary_key=True, max_length=64, default=generate_id, editable=False)
-    ine = models.CharField(max_length=64, unique=True)
-    nom = models.CharField(max_length=255)
-    prenom = models.CharField(max_length=255)
-    filiere = models.CharField(max_length=255)
-    niveau = models.CharField(max_length=32)
-    annee_academique = models.CharField(max_length=16)
-
-    ufr = models.ForeignKey(Ufr, related_name="etudiants", on_delete=models.PROTECT)
-    groupe = models.ForeignKey(Groupe, related_name="etudiants", on_delete=models.SET_NULL, null=True, blank=True)
-
-    class Meta:
-        db_table = "etudiant"
-        indexes = [
-            models.Index(fields=["groupe"]),
-            models.Index(fields=["ufr"]),
-            models.Index(fields=["ufr", "annee_academique"]),
-            models.Index(fields=["ufr", "filiere"]),
-        ]
-
-    def __str__(self) -> str:
-        return f"{self.prenom} {self.nom} ({self.ine})"
 
 
 class Salle(models.Model):
@@ -134,3 +109,40 @@ class UniteEnseignement(models.Model):
 
     def __str__(self) -> str:
         return self.intitule
+
+
+class Departement(models.Model):
+    """[V3.2] Département (= « filière ») officiel d'un établissement.
+
+    Introduit à la réception de la liste officielle de l'UJKZ le
+    2026-09-07 : 53 départements répartis sur 12 établissements. Jusque-là,
+    la filière d'un groupe était une chaîne libre, et les valeurs proposées
+    à la saisie étaient déduites des groupes déjà créés — ce qui ne pouvait
+    donner qu'un référentiel de qualité décroissante, chaque faute de frappe
+    devenant une filière de plus dans la recherche publique (FR-PUB-02).
+
+    Reste une chaîne dénormalisée sur `Groupe.filiere` plutôt qu'une clé
+    étrangère, délibérément : un groupe garde le libellé de sa filière au
+    moment de sa création, même si le département est renommé ou fermé
+    ensuite. Un emploi du temps de l'an dernier ne doit pas changer de nom
+    rétroactivement.
+    """
+
+    id = models.CharField(primary_key=True, max_length=64, default=generate_id, editable=False)
+    ufr = models.ForeignKey(Ufr, related_name="departements", on_delete=models.CASCADE)
+    libelle = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "departement"
+        ordering = ["libelle"]
+        indexes = [models.Index(fields=["ufr"])]
+        constraints = [
+            # Insensible à la casse : "Informatique" et "informatique" sont
+            # le même département, et c'est précisément le doublon que ce
+            # modèle existe pour empêcher.
+            models.UniqueConstraint(Lower("libelle"), "ufr", name="departement_libelle_ufr_unique"),
+        ]
+
+    def __str__(self) -> str:
+        return self.libelle

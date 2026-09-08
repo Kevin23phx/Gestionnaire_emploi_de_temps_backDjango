@@ -1,33 +1,37 @@
+import datetime
 import uuid
 
 from django.db import transaction
-from django.db.models import Count, Q
+from django.utils import timezone
+from django.db.models import F, Q
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 
 from accounts.models import Enseignant, EnseignantUfr
 from audit import services as audit_services
 from conflict_engine import services as conflict_engine
 from conflict_engine.types import CandidateCreneau
-from core.exceptions_helpers import ConflictWithBody
+from core.exceptions_helpers import Conflict, ConflictWithBody
 from core.time_utils import hhmm_to_minutes, minutes_to_hhmm
 from core.ufr_scope import resolve_ufr_scope
-from notifications import services as notification_services
-from planning.models import ConflitJournal, Creneau
+from planning.models import Creneau, ConflitJournal, SeanceAnnulee
+from public import diffusion
 from referentiel.models import Groupe, Salle, UniteEnseignement
 
-# Marqueur technique, jamais montré à l'utilisateur : voir _ecrire_un pour
-# le problème qu'il résout (permutation entre deux créneaux de la même
-# salle). Une chaîne fixe et reconnaissable pour que demandes/services.py
-# puisse la nettoyer précisément sans jamais toucher une vraie dérogation.
-EXEMPTION_TECHNIQUE_PERMUTATION = "__exemption_technique_permutation__"
+# [V3] EXEMPTION_TECHNIQUE_PERMUTATION a disparu avec le circuit de
+# permutation (02_SRS §2.7 retirée) : c'était un marqueur posé sur une
+# dérogation le temps d'échanger deux créneaux de même salle, et plus
+# personne n'échange de créneaux. Le paramètre `exclude_ids` de
+# write_one_in_transaction, qui n'existait que pour lui, part avec.
 
 CRENEAU_SELECT_RELATED = ("ue", "enseignant", "salle", "groupe")
+CRENEAU_PREFETCH = ("seances_annulees",)
 
 
 def _effectifs_par_groupe(groupe_ids: list[str]) -> dict[str, int]:
+    # [V3.1] Lecture directe de la colonne : l'effectif est saisi par le
+    # Gestionnaire depuis la suppression du référentiel des étudiants.
     uniques = list(set(groupe_ids))
-    lignes = Groupe.objects.filter(id__in=uniques).annotate(effectif=Count("etudiants"))
-    return {g.id: g.effectif for g in lignes}
+    return dict(Groupe.objects.filter(id__in=uniques).values_list("id", "effectif"))
 
 
 def _denormaliser(creneau: Creneau, effectif: int) -> dict:
@@ -58,6 +62,18 @@ def _denormaliser(creneau: Creneau, effectif: int) -> dict:
         "heureFin": minutes_to_hhmm(creneau.heure_fin_minutes),
         "statut": creneau.statut,
         "motif": creneau.motif,
+        # [V3] Le numéro de révision voyage jusqu'au client : c'est lui qui
+        # permet de savoir qu'un créneau affiché est périmé sans comparer
+        # champ à champ.
+        "version": creneau.version,
+        # [V3] FR-EDT-08 : les annulations datées accompagnent toujours le
+        # créneau, jamais un appel séparé — sans quoi une grille pourrait
+        # s'afficher un instant sans elles et laisser croire que le cours a
+        # lieu. Le prefetch est fait par l'appelant (CRENEAU_PREFETCH).
+        "seancesAnnulees": [
+            {"date": sa.date.isoformat(), "motif": sa.motif, "annulePar": sa.annule_par}
+            for sa in creneau.seances_annulees.all()
+        ],
     }
 
 
@@ -71,54 +87,55 @@ def _conflit_to_dto(c) -> dict:
     }
 
 
-# INT-06 : un étudiant ne voit jamais que son propre groupe, un enseignant
-# que son propre planning — le filtre est appliqué ici, en ignorant
-# silencieusement tout paramètre fourni par le client pour ces deux rôles.
-def list_creneaux(user, groupe_id_filtre=None, enseignant_id_filtre=None, ufr_id_pour_admin=None):
-    if user.role == "etudiant":
-        groupe_id = user.etudiant.groupe_id if user.etudiant else "__aucun__"
-        qs = Creneau.objects.filter(groupe_id=groupe_id or "__aucun__")
-    elif user.role == "enseignant":
-        enseignant_id = user.enseignant.id if user.enseignant else "__aucun__"
-        qs = Creneau.objects.filter(enseignant_id=enseignant_id)
-    else:
-        # INT-07 (V2) : un Gestionnaire ne voit jamais les créneaux d'une
-        # autre UFR, même en le demandant explicitement. L'Admin voit tout
-        # (FR-ADMIN-03), ou une seule UFR choisie (FR-ADMIN-06).
-        scope = resolve_ufr_scope(user, ufr_id_pour_admin)
-        qs = Creneau.objects.all()
-        if not scope.toutes:
-            qs = qs.filter(groupe__ufr_id__in=scope.ufr_ids)
-        if groupe_id_filtre:
-            qs = qs.filter(groupe_id=groupe_id_filtre)
-        if enseignant_id_filtre:
-            qs = qs.filter(enseignant_id=enseignant_id_filtre)
+# [V3] INT-06 est levée (tout programme est public, FR-PUB-01) : les
+# branches "etudiant" et "enseignant" qui restreignaient la lecture ont
+# disparu avec les rôles correspondants. Ce qui subsiste ici — et qui n'a
+# rien perdu de sa force — c'est INT-07 : le cloisonnement inter-UFR du
+# Gestionnaire, qui porte sur la GESTION, pas sur la consultation.
+#
+# La lecture publique ne passe pas par cette fonction : elle a sa propre
+# projection dans public/services.py, délibérément séparée (cf.
+# 04_Exigence_Architecture ligne 20).
+def list_creneaux(user, groupe_id_filtre=None, enseignant_id_filtre=None, ufr_id_pour_admin=None, recherche=None):
+    # INT-07 (V2) : un Gestionnaire ne voit jamais les créneaux d'une
+    # autre UFR, même en le demandant explicitement. L'Admin voit tout
+    # (FR-ADMIN-03), ou une seule UFR choisie (FR-ADMIN-06).
+    scope = resolve_ufr_scope(user, ufr_id_pour_admin)
+    qs = Creneau.objects.all()
+    if not scope.toutes:
+        qs = qs.filter(groupe__ufr_id__in=scope.ufr_ids)
+    if groupe_id_filtre:
+        qs = qs.filter(groupe_id=groupe_id_filtre)
+    if enseignant_id_filtre:
+        qs = qs.filter(enseignant_id=enseignant_id_filtre)
+    # [V3] FR-FILT-01/06 : filtrage côté serveur, jamais un tri du tout
+    # dans le navigateur — les créneaux d'une UFR se comptent en milliers.
+    if recherche:
+        # FR-FILT-02 : `unaccent` avant `icontains` — sans quoi « reseaux »
+        # ne trouverait pas « Réseaux », ce qui, sur un clavier de téléphone
+        # sans accents, revient à ne pas avoir de recherche du tout.
+        qs = qs.filter(
+            Q(ue__intitule__unaccent__icontains=recherche)
+            | Q(ue__code__unaccent__icontains=recherche)
+            | Q(enseignant__nom__unaccent__icontains=recherche)
+            | Q(salle__nom__unaccent__icontains=recherche)
+            | Q(groupe__nom__unaccent__icontains=recherche)
+        )
 
-    creneaux = list(qs.select_related(*CRENEAU_SELECT_RELATED))
+    creneaux = list(qs.select_related(*CRENEAU_SELECT_RELATED).prefetch_related(*CRENEAU_PREFETCH))
     effectifs = _effectifs_par_groupe([c.groupe_id for c in creneaux])
     return [_denormaliser(c, effectifs.get(c.groupe_id, 0)) for c in creneaux]
 
 
 def find_one(creneau_id: str) -> dict:
     try:
-        creneau = Creneau.objects.select_related(*CRENEAU_SELECT_RELATED).get(id=creneau_id)
+        creneau = (
+            Creneau.objects.select_related(*CRENEAU_SELECT_RELATED).prefetch_related(*CRENEAU_PREFETCH).get(id=creneau_id)
+        )
     except Creneau.DoesNotExist:
         raise NotFound("Créneau introuvable.")
     effectif = _effectifs_par_groupe([creneau.groupe_id]).get(creneau.groupe_id, 0)
     return _denormaliser(creneau, effectif)
-
-
-# Vue DÉLIBÉRÉMENT non filtrée par INT-06 — nécessaire pour qu'un enseignant
-# puisse choisir, au moment de proposer une permutation, un créneau
-# appartenant à un AUTRE enseignant.
-def list_programme_complet(user) -> list[dict]:
-    scope = resolve_ufr_scope(user)
-    qs = Creneau.objects.exclude(statut="annule")
-    if not scope.toutes:
-        qs = qs.filter(groupe__ufr_id__in=scope.ufr_ids)
-    creneaux = list(qs.select_related(*CRENEAU_SELECT_RELATED))
-    effectifs = _effectifs_par_groupe([c.groupe_id for c in creneaux])
-    return [_denormaliser(c, effectifs.get(c.groupe_id, 0)) for c in creneaux]
 
 
 def _valider_horaire(heure_debut_minutes: int, heure_fin_minutes: int) -> None:
@@ -169,7 +186,7 @@ def _construire_candidat(item: dict, statut: str, heure_debut_minutes: int, heur
     except Salle.DoesNotExist:
         raise NotFound("Salle introuvable.")
     try:
-        groupe = Groupe.objects.annotate(effectif=Count("etudiants")).get(id=item["groupeId"])
+        groupe = Groupe.objects.get(id=item["groupeId"])
     except Groupe.DoesNotExist:
         raise NotFound("Groupe introuvable.")
 
@@ -197,9 +214,7 @@ def _libelle_action(action: str) -> str:
     return {"creation": "Création", "annulation": "Annulation", "modification": "Modification"}[action]
 
 
-def _ecrire_un(
-    item: dict, auteur: str, contexte: list[CandidateCreneau], exemption_technique: bool = False, user=None
-) -> str:
+def _ecrire_un(item: dict, auteur: str, contexte: list[CandidateCreneau], user=None) -> str:
     statut = item.get("statut") or "normal"
     if statut != "normal" and not (item.get("motif") or "").strip():
         raise ValidationError("Le motif est obligatoire pour modifier ou annuler un créneau.")
@@ -231,6 +246,7 @@ def _ecrire_un(
     ancien_groupe_id = None
     ancien_enseignant_id = None
     salle_changee = False
+    deplacement: dict = {}
 
     if item.get("id"):
         try:
@@ -241,14 +257,22 @@ def _ecrire_un(
         ancien_enseignant_id = existant.enseignant_id if existant.enseignant_id != item["enseignantId"] else None
         salle_changee = existant.salle_id != item["salleId"]
         action = "annulation" if statut == "annule" else "modification"
+
+        # [V3] FR-PUB-07 : un déplacement d'horaire est le seul changement
+        # qui passe inaperçu dans un agenda — l'événement bouge, sans rien
+        # dire. On mémorise l'ancienne case pour y laisser un fantôme
+        # pendant une semaine (voir public/ical.py).
+        if existant.jour != item["jour"] or existant.heure_debut_minutes != heure_debut_minutes:
+            deplacement = dict(
+                ancien_jour=existant.jour,
+                ancien_heure_debut_minutes=existant.heure_debut_minutes,
+                ancien_heure_fin_minutes=existant.heure_fin_minutes,
+                deplace_le=timezone.now(),
+            )
     else:
         action = "creation"
 
-    derogation_motif_a_ecrire = None
-    if conflits:
-        derogation_motif_a_ecrire = item["motifDerogation"].strip()
-    elif exemption_technique:
-        derogation_motif_a_ecrire = EXEMPTION_TECHNIQUE_PERMUTATION
+    derogation_motif_a_ecrire = item["motifDerogation"].strip() if conflits else None
 
     donnees = dict(
         ue_id=item["ueId"],
@@ -264,7 +288,13 @@ def _ecrire_un(
     )
 
     if item.get("id"):
-        Creneau.objects.filter(id=item["id"]).update(**donnees)
+        # [V3] INV-13/FR-PUB-06 : le numéro de révision monte à chaque
+        # écriture. C'est ce qui fait qu'un agenda déjà abonné accepte de
+        # remplacer l'événement qu'il détient au lieu de l'ignorer.
+        # F("version") + 1 plutôt qu'une lecture puis une écriture : deux
+        # gestionnaires qui modifient le même créneau au même instant ne
+        # doivent pas produire deux fois la même révision.
+        Creneau.objects.filter(id=item["id"]).update(version=F("version") + 1, **donnees, **deplacement)
         creneau_id = item["id"]
     else:
         creneau = Creneau.objects.create(**donnees)
@@ -278,7 +308,12 @@ def _ecrire_un(
 
     audit_services.record(auteur, f"{_libelle_action(action)} créneau — {refs['ue_intitule']}", item.get("motif"), creneau_id)
 
-    notification_services.on_creneau_changed(
+    # [V3] INV-06 : la diffusion part dans la MÊME transaction que
+    # l'écriture — jamais "créneau enregistré mais changement non diffusé",
+    # ni l'inverse. Ce qui change par rapport à la V2, c'est le destinataire :
+    # il n'y a plus d'utilisateurs nominatifs à résoudre en base, seulement
+    # un groupe dont le programme public vient de changer.
+    diffusion.on_creneau_changed(
         creneau_id=creneau_id,
         action=action,
         ue_intitule=refs["ue_intitule"],
@@ -288,9 +323,7 @@ def _ecrire_un(
         salle_nom=refs["salle_nom"],
         salle_changee=salle_changee,
         groupe_id=item["groupeId"],
-        enseignant_id=item["enseignantId"],
         groupe_id_precedent=ancien_groupe_id,
-        enseignant_id_precedent=ancien_enseignant_id,
     )
 
     return creneau_id
@@ -347,15 +380,11 @@ def write_batch(items: list[dict], auteur: str, user) -> list[str]:
 
 @transaction.atomic
 def write_one(item: dict, auteur: str, user) -> str:
-    return write_one_in_transaction(item, auteur, [], user)
+    return write_one_in_transaction(item, auteur, user)
 
 
-def write_one_in_transaction(item: dict, auteur: str, exclude_ids: list[str] | None = None, user=None) -> str:
-    exclude_ids = exclude_ids or []
-    contexte = _charger_candidats()
-    if exclude_ids:
-        contexte = [c for c in contexte if c.id not in exclude_ids]
-    return _ecrire_un(item, auteur, contexte, exemption_technique=bool(exclude_ids), user=user)
+def write_one_in_transaction(item: dict, auteur: str, user=None) -> str:
+    return _ecrire_un(item, auteur, _charger_candidats(), user=user)
 
 
 def charger_comme_dto(creneau_id: str) -> dict:
@@ -397,3 +426,109 @@ def annuler(creneau_id: str, motif: str, auteur: str, user) -> str:
         "motif": motif,
     }
     return write_one(item, auteur, user)
+
+
+# ---------------------------------------------------------------------------
+# [V3] Annulation d'une séance à une date précise (FR-EDT-07 / INV-14 / RM-10)
+# ---------------------------------------------------------------------------
+# Le cas d'usage devenu le plus fréquent : un enseignant téléphone au
+# Gestionnaire pour signaler qu'il sera absent tel jour. Avant la V3, la
+# seule réponse possible était `annuler()`, qui retire le cours du programme
+# pour TOUTE la période — le Gestionnaire devait ensuite le recréer à la
+# main. Les deux opérations coexistent désormais et ne se confondent pas.
+
+
+def _creneau_du_gestionnaire(creneau_id: str, user) -> Creneau:
+    """INT-07 : un Gestionnaire n'agit jamais sur le créneau d'une autre UFR.
+    Facteur commun aux deux opérations sur les séances, pour qu'aucune ne
+    puisse être ajoutée demain en oubliant le contrôle."""
+    try:
+        creneau = Creneau.objects.select_related("groupe__ufr", "ue").get(id=creneau_id)
+    except Creneau.DoesNotExist:
+        raise NotFound("Créneau introuvable.")
+    if user.role == "scolarite" and creneau.groupe.ufr_id != user.ufr_id:
+        raise PermissionDenied("Ce créneau appartient à une autre UFR.")
+    return creneau
+
+
+JOURS_INDEX = {"lundi": 0, "mardi": 1, "mercredi": 2, "jeudi": 3, "vendredi": 4, "samedi": 5}
+
+
+@transaction.atomic
+def annuler_seance(creneau_id: str, date_iso: str, motif: str, auteur: str, user) -> dict:
+    if not (motif or "").strip():
+        raise ValidationError("Le motif est obligatoire pour annuler une séance.")
+
+    creneau = _creneau_du_gestionnaire(creneau_id, user)
+
+    try:
+        date = datetime.date.fromisoformat(date_iso)
+    except (TypeError, ValueError):
+        raise ValidationError("Date invalide (format attendu : AAAA-MM-JJ).")
+
+    # Une annulation datée doit tomber sur un jour où le cours a réellement
+    # lieu, sinon elle ne suspend rien et laisse croire au Gestionnaire que
+    # l'absence est traitée.
+    if date.weekday() != JOURS_INDEX[creneau.jour]:
+        raise ValidationError(f"Ce créneau a lieu le {creneau.jour}, pas le {date.isoformat()}.")
+
+    # INT-11 : on n'annule pas une séance qui n'a jamais été programmée.
+    ufr = creneau.groupe.ufr
+    if ufr.periode_definie and not (ufr.periode_debut <= date <= ufr.periode_fin):
+        raise ValidationError(
+            f"Cette date est hors de la période académique de l'UFR "
+            f"({ufr.periode_debut.isoformat()} → {ufr.periode_fin.isoformat()})."
+        )
+
+    # ERR-09 : annuler une séance d'un créneau déjà annulé pour toute la
+    # période est sans objet — le refuser plutôt que d'enregistrer une
+    # annulation d'annulation que personne ne saurait interpréter ensuite.
+    if creneau.statut == "annule":
+        raise ValidationError("Ce créneau est déjà annulé pour toute la période académique.")
+
+    _, cree = SeanceAnnulee.objects.get_or_create(
+        creneau=creneau, date=date, defaults={"motif": motif.strip(), "annule_par": auteur}
+    )
+    if not cree:
+        raise Conflict("Cette séance est déjà annulée.")
+
+    # Le créneau lui-même n'est pas touché (INV-14), mais sa révision monte :
+    # son flux calendrier vient de changer, et sans cet incrément les agendas
+    # déjà abonnés ignoreraient l'annulation.
+    Creneau.objects.filter(id=creneau_id).update(version=F("version") + 1)
+
+    audit_services.record(
+        auteur, f"Annulation séance du {date.isoformat()} — {creneau.ue.intitule}", motif.strip(), creneau_id
+    )
+    diffusion.on_seance_annulee(
+        creneau_id=creneau_id,
+        groupe_id=creneau.groupe_id,
+        ue_intitule=creneau.ue.intitule,
+        date=date.isoformat(),
+    )
+    return find_one(creneau_id)
+
+
+@transaction.atomic
+def retablir_seance(creneau_id: str, date_iso: str, auteur: str, user) -> dict:
+    """Rétablir une séance annulée par erreur. Symétrique d'annuler_seance —
+    et non une suppression silencieuse : l'audit garde la trace des deux
+    opérations, comme pour toute écriture de planning (INV-04)."""
+    creneau = _creneau_du_gestionnaire(creneau_id, user)
+    try:
+        date = datetime.date.fromisoformat(date_iso)
+    except (TypeError, ValueError):
+        raise ValidationError("Date invalide (format attendu : AAAA-MM-JJ).")
+
+    supprimees, _ = SeanceAnnulee.objects.filter(creneau_id=creneau_id, date=date).delete()
+    if not supprimees:
+        raise NotFound("Aucune annulation enregistrée pour cette séance.")
+
+    Creneau.objects.filter(id=creneau_id).update(version=F("version") + 1)
+    audit_services.record(
+        auteur, f"Rétablissement séance du {date.isoformat()} — {creneau.ue.intitule}", None, creneau_id
+    )
+    diffusion.on_seance_annulee(
+        creneau_id=creneau_id, groupe_id=creneau.groupe_id, ue_intitule=creneau.ue.intitule, date=date.isoformat()
+    )
+    return find_one(creneau_id)

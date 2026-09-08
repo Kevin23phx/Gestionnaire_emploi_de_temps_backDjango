@@ -28,10 +28,7 @@ class CookieSessionAuthentication(BaseAuthentication):
 
         token_hash = hash_session_token(raw_token)
         try:
-            session = (
-                Session.objects.select_related("utilisateur", "utilisateur__etudiant", "utilisateur__enseignant")
-                .get(token_hash=token_hash)
-            )
+            session = Session.objects.select_related("utilisateur").get(token_hash=token_hash)
         except Session.DoesNotExist:
             return None
 
@@ -39,12 +36,6 @@ class CookieSessionAuthentication(BaseAuthentication):
             return None
 
         utilisateur = session.utilisateur
-        enseignant_ufr_ids = []
-        if utilisateur.enseignant_id:
-            enseignant_ufr_ids = list(
-                utilisateur.enseignant.ufrs.values_list("ufr_id", flat=True)
-            )
-
         user = AuthenticatedUser(
             id=utilisateur.id,
             identifiant=utilisateur.identifiant,
@@ -52,8 +43,5 @@ class CookieSessionAuthentication(BaseAuthentication):
             prenom=utilisateur.prenom,
             role=utilisateur.role,
             ufr_id=utilisateur.ufr_id,
-            enseignant_ufr_ids=enseignant_ufr_ids,
-            etudiant=utilisateur.etudiant,
-            enseignant=utilisateur.enseignant,
         )
         return (user, None)

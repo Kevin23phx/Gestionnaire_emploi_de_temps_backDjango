@@ -4,3 +4,5 @@ psycopg[binary]==3.3.4
 django-cors-headers==4.9.0
 argon2-cffi==25.1.0
 python-dotenv==1.2.3
+# [V3] Alertes Web Push (FR-PUB-08) — voir README, section « Alertes Web Push ».
+pywebpush==2.0.3

@@ -96,7 +96,7 @@ def _compter_resolus(conflits: list[ConflitJournal]) -> int:
             enseignant_prenom=c.enseignant.prenom,
             groupe_id=c.groupe_id,
             groupe_nom=c.groupe.nom,
-            groupe_effectif=c.groupe.etudiants.count(),
+            groupe_effectif=c.groupe.effectif,
             salle_id=c.salle_id,
             salle_nom=c.salle.nom,
             salle_capacite=c.salle.capacite,

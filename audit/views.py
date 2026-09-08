@@ -14,8 +14,17 @@ class AuditListCreateView(APIView):
         return [require_roles("scolarite")()]
 
     def get(self, request):
-        ufr_id = request.query_params.get("ufrId")
-        entries = services.list_entries(request.user, ufr_id)
+        params = request.query_params
+        entries = services.list_entries(
+            request.user,
+            params.get("ufrId"),
+            # [V3] FR-AUD-04
+            recherche=(params.get("recherche") or "").strip() or None,
+            depuis=params.get("depuis") or None,
+            jusqua=params.get("jusqua") or None,
+            auteur=(params.get("auteur") or "").strip() or None,
+            limite=int(params.get("limite") or 200),
+        )
         return Response({"entries": AuditEntrySerializer(entries, many=True).data})
 
     def post(self, request):

@@ -1,7 +1,15 @@
-"""Données de démonstration — traduction directe de
-backend/prisma/seed.ts (backend NestJS de référence, dépôt distinct
-appartenant à un coéquipier). Mêmes comptes de démo (mot de passe
-"password" pour tous)."""
+"""Données de démonstration.
+
+[V3] Deux comptes de rôles seulement (Gestionnaire, Admin) : les comptes
+Étudiant et Enseignant ont disparu avec les rôles correspondants — le
+programme se consulte désormais sans compte, à la racine du site.
+
+[V3.1] Le référentiel nominatif des étudiants a été supprimé : l'effectif
+d'un groupe est un nombre saisi (RM-02). Les Enseignants, eux, restent des
+entités du référentiel — un créneau doit toujours en porter un (INV-01).
+"""
+
+import datetime
 
 from argon2 import PasswordHasher
 from django.core.management.base import BaseCommand
@@ -9,11 +17,11 @@ from django.db import transaction
 
 from accounts.models import Enseignant, EnseignantUfr, Role, Session, Utilisateur
 from audit.models import AuditEntry
+from core.donnees_ujkz import ETABLISSEMENTS, NOMS_COMPLETS_A_CONFIRMER
 from core.models import Ufr
-from demandes.models import DemandeEnseignant
-from notifications.models import NotificationItem
-from planning.models import ConflitJournal, Creneau
-from referentiel.models import Etudiant, Groupe, Salle, StructureGestionnaire, UniteEnseignement
+from planning.models import ConflitJournal, Creneau, SeanceAnnulee
+from public.models import AbonnementAlerte
+from referentiel.models import Departement, Groupe, Salle, StructureGestionnaire, UniteEnseignement
 
 hasher = PasswordHasher()
 
@@ -24,15 +32,15 @@ class Command(BaseCommand):
     @transaction.atomic
     def handle(self, *args, **options):
         self.stdout.write("Nettoyage des données existantes...")
-        NotificationItem.objects.all().delete()
+        AbonnementAlerte.objects.all().delete()
+        Departement.objects.all().delete()
         ConflitJournal.objects.all().delete()
-        DemandeEnseignant.objects.all().delete()
+        SeanceAnnulee.objects.all().delete()
         AuditEntry.objects.all().delete()
         Creneau.objects.all().delete()
         Session.objects.all().delete()
         Utilisateur.objects.all().delete()
         EnseignantUfr.objects.all().delete()
-        Etudiant.objects.all().delete()
         Enseignant.objects.all().delete()
         Salle.objects.all().delete()
         Groupe.objects.all().delete()
@@ -41,14 +49,30 @@ class Command(BaseCommand):
 
         mot_de_passe_hash = hasher.hash("password")
 
-        self.stdout.write("UFR (V2 multi-UFR — les 5 UFR réelles de l'UJKZ)...")
+        self.stdout.write("Établissements (V3.2 — référentiel officiel UJKZ)...")
+        # [V3] FR-REF-16 : chaque établissement déclare sa période
+        # académique. Calée sur la date du jour plutôt que sur des dates
+        # fixes, pour que la démonstration tombe toujours DANS la période —
+        # un seed daté de 2026 donnerait un programme public vide six mois
+        # plus tard, et laisserait croire à un bug.
+        aujourdhui = datetime.date.today()
+        debut = aujourdhui - datetime.timedelta(days=30)
+        fin = aujourdhui + datetime.timedelta(days=120)
+        periode = dict(periode_libelle="Semestre en cours", periode_debut=debut, periode_fin=fin)
+
+        # [V3.2] Les 12 établissements réels (5 UFR + 6 instituts + 1 école
+        # doctorale) et leurs 53 départements, depuis core/donnees_ujkz.py.
         Ufr.objects.bulk_create(
             [
-                Ufr(id="ufr-sh", nom="UFR Sciences Humaines", sigle="sh"),
-                Ufr(id="ufr-sds", nom="UFR Sciences de la Santé", sigle="sds"),
-                Ufr(id="ufr-svt", nom="UFR Sciences de la Vie et de la Terre", sigle="svt"),
-                Ufr(id="ufr-sea", nom="UFR Sciences Exactes et Appliquées", sigle="sea"),
-                Ufr(id="ufr-lac", nom="UFR Lettres Arts et Communication", sigle="lac"),
+                Ufr(id=f"ufr-{sigle}", nom=nom, sigle=sigle, type=type_etab, **periode)
+                for sigle, nom, type_etab, _ in ETABLISSEMENTS
+            ]
+        )
+        Departement.objects.bulk_create(
+            [
+                Departement(ufr_id=f"ufr-{sigle}", libelle=libelle)
+                for sigle, _, _, departements in ETABLISSEMENTS
+                for libelle in departements
             ]
         )
         # Les données pilotes ci-dessous (référentiel Informatique, créneaux,
@@ -73,52 +97,14 @@ class Command(BaseCommand):
         salle_102 = Salle.objects.create(nom="Salle 102", batiment="UFR/SEA", capacite=40, type_usage="propre", ufr_id=ufr_pilote)
         Salle.objects.create(nom="Labo Info 1", batiment="UFR/SEA", capacite=30, type_usage="propre", ufr_id=ufr_pilote)
         salle_402 = Salle.objects.create(nom="Salle 402", batiment="UFR/SEA", capacite=70, type_usage="propre", ufr_id=ufr_pilote)
-        # Salle volontairement petite : démo de conflit de capacité contre un
-        # effectif RÉELLEMENT compté (8 étudiants).
+        # Salle volontairement petite : démo de conflit de capacité contre
+        # l'effectif saisi du Groupe A (8 étudiants).
         salle_6 = Salle.objects.create(nom="Salle 6", batiment="UFR/SEA", capacite=6, type_usage="propre", ufr_id=ufr_pilote)
 
-        groupe_a = Groupe.objects.create(nom="L3 INFO - Groupe A", filiere="Informatique", niveau="L3", annee_academique="2025-2026", ufr_id=ufr_pilote)
-        groupe_td1 = Groupe.objects.create(nom="L2 INFO - TD 1", filiere="Informatique", niveau="L2", annee_academique="2025-2026", ufr_id=ufr_pilote)
-
-        self.stdout.write("Étudiants...")
-        # L'INE encode l'année d'inscription (préfixe "2023" = rentrée
-        # 2023-2024) — anneeAcademique la reprend fidèlement (FR-REF-09).
-        etudiants_groupe_a = [
-            Etudiant.objects.create(
-                ine=ine, nom=nom, prenom=prenom, filiere="Informatique", niveau="L3", annee_academique="2023-2024",
-                groupe=groupe_a, ufr_id=ufr_pilote,
-            )
-            for ine, nom, prenom in [
-                ("20230145", "Ouédraogo", "Aïcha"),
-                ("20230101", "Kaboré", "Awa"),
-                ("20230102", "Zongo", "Issa"),
-                ("20230103", "Compaoré", "Fatoumata"),
-                ("20230104", "Ouattara", "Boureima"),
-                ("20230105", "Nikiéma", "Salamata"),
-                ("20230106", "Bamogo", "Yacouba"),
-                ("20230107", "Ilboudo", "Nathalie"),
-            ]
-        ]
-        aicha_ouedraogo = etudiants_groupe_a[0]
-
-        for ine, nom, prenom in [
-            ("20240201", "Sanou", "Abdoulaye"),
-            ("20240202", "Congo", "Aminata"),
-            ("20240203", "Kagambega", "Rasmané"),
-            ("20240204", "Tapsoba", "Mariam"),
-            ("20240205", "Ky", "Adama"),
-            ("20240206", "Kologo", "Hawa"),
-        ]:
-            Etudiant.objects.create(ine=ine, nom=nom, prenom=prenom, filiere="Informatique", niveau="L2", annee_academique="2024-2025", groupe=groupe_td1, ufr_id=ufr_pilote)
-
-        # Fraîchement importés, pas encore affectés à un groupe.
-        for ine, nom, prenom in [
-            ("20250301", "Ouédraogo", "Boukary"),
-            ("20250302", "Sawadogo", "Aïda"),
-            ("20250303", "Traoré", "Inoussa"),
-            ("20250304", "Kaboré", "Ramata"),
-        ]:
-            Etudiant.objects.create(ine=ine, nom=nom, prenom=prenom, filiere="Électricité", niveau="L1", annee_academique="2025-2026", ufr_id=ufr_pilote)
+        # [V3.1] L'effectif est saisi, plus compté : il n'existe plus de
+        # référentiel nominatif d'étudiants (voir referentiel/models.py).
+        groupe_a = Groupe.objects.create(nom="L3 INFO - Groupe A", filiere="Informatique", niveau="L3", annee_academique="2025-2026", effectif=8, ufr_id=ufr_pilote)
+        groupe_td1 = Groupe.objects.create(nom="L2 INFO - TD 1", filiere="Informatique", niveau="L2", annee_academique="2025-2026", effectif=6, ufr_id=ufr_pilote)
 
         self.stdout.write("Autres UFR (données fictives pour observer le cloisonnement multi-UFR)...")
 
@@ -126,14 +112,8 @@ class Command(BaseCommand):
         ue_bio_cell = UniteEnseignement.objects.create(code="SVT101", intitule="Biologie Cellulaire", niveau="L1", ufr_id="ufr-svt")
         ue_geo_dyn = UniteEnseignement.objects.create(code="SVT102", intitule="Géodynamique Interne", niveau="L2", ufr_id="ufr-svt")
         amphi_svt = Salle.objects.create(nom="Amphi SVT 1", batiment="UFR/SVT", capacite=120, type_usage="propre", ufr_id="ufr-svt")
-        groupe_svt_l1 = Groupe.objects.create(nom="L1 SVT - Groupe A", filiere="Biologie", niveau="L1", annee_academique="2025-2026", ufr_id="ufr-svt")
-        groupe_svt_l2 = Groupe.objects.create(nom="L2 Géologie", filiere="Géologie", niveau="L2", annee_academique="2024-2025", ufr_id="ufr-svt")
-        etudiants_svt_l1 = [
-            Etudiant.objects.create(ine=ine, nom=nom, prenom=prenom, filiere="Biologie", niveau="L1", annee_academique="2025-2026", ufr_id="ufr-svt", groupe=groupe_svt_l1)
-            for ine, nom, prenom in [("SVT-0001", "Barry", "Aminata"), ("SVT-0002", "Ouédraogo", "Karim"), ("SVT-0003", "Yaméogo", "Sarah")]
-        ]
-        for ine, nom, prenom in [("SVT-0004", "Kaboré", "Désiré"), ("SVT-0005", "Sanou", "Fatao")]:
-            Etudiant.objects.create(ine=ine, nom=nom, prenom=prenom, filiere="Géologie", niveau="L2", annee_academique="2024-2025", ufr_id="ufr-svt", groupe=groupe_svt_l2)
+        groupe_svt_l1 = Groupe.objects.create(nom="L1 SVT - Groupe A", filiere="Biologie", niveau="L1", annee_academique="2025-2026", effectif=95, ufr_id="ufr-svt")
+        groupe_svt_l2 = Groupe.objects.create(nom="L2 Géologie", filiere="Géologie", niveau="L2", annee_academique="2024-2025", effectif=42, ufr_id="ufr-svt")
         # FR-REF-06 : Kaboré Ismaël (déjà enseignant à l'UFR-SEA) intervient
         # AUSSI à l'UFR-SVT — même fiche Enseignant, une affectation de plus.
         EnseignantUfr.objects.create(enseignant=kabore, ufr_id="ufr-svt")
@@ -145,9 +125,7 @@ class Command(BaseCommand):
         # --- UFR-SH ---
         ue_socio_gen = UniteEnseignement.objects.create(code="SH101", intitule="Sociologie Générale", niveau="L2", ufr_id="ufr-sh")
         salle_sh = Salle.objects.create(nom="Salle 201", batiment="UFR/SH", capacite=60, type_usage="propre", ufr_id="ufr-sh")
-        groupe_sh_l2 = Groupe.objects.create(nom="L2 Sociologie", filiere="Sociologie", niveau="L2", annee_academique="2024-2025", ufr_id="ufr-sh")
-        for ine, nom, prenom in [("SH-0001", "Tapsoba", "Awa"), ("SH-0002", "Ouali", "Boureima"), ("SH-0003", "Nabaloum", "Clarisse")]:
-            Etudiant.objects.create(ine=ine, nom=nom, prenom=prenom, filiere="Sociologie", niveau="L2", annee_academique="2024-2025", ufr_id="ufr-sh", groupe=groupe_sh_l2)
+        groupe_sh_l2 = Groupe.objects.create(nom="L2 Sociologie", filiere="Sociologie", niveau="L2", annee_academique="2024-2025", effectif=58, ufr_id="ufr-sh")
         ens_sh = Enseignant.objects.create(nom="Compaoré", prenom="Elie")
         EnseignantUfr.objects.create(enseignant=ens_sh, ufr_id="ufr-sh")
         Creneau.objects.create(ue=ue_socio_gen, enseignant=ens_sh, groupe=groupe_sh_l2, salle=salle_sh, jour="mercredi", heure_debut_minutes=8 * 60, heure_fin_minutes=10 * 60, statut="normal")
@@ -155,9 +133,7 @@ class Command(BaseCommand):
         # --- UFR-SDS ---
         ue_anat = UniteEnseignement.objects.create(code="SDS101", intitule="Anatomie Générale", niveau="L1", ufr_id="ufr-sds")
         salle_sds = Salle.objects.create(nom="Amphi Santé", batiment="UFR/SDS", capacite=150, type_usage="propre", ufr_id="ufr-sds")
-        groupe_sds_l1 = Groupe.objects.create(nom="L1 Médecine - Groupe A", filiere="Médecine", niveau="L1", annee_academique="2025-2026", ufr_id="ufr-sds")
-        for ine, nom, prenom in [("SDS-0001", "Kientega", "Rahim"), ("SDS-0002", "Diallo", "Mariam")]:
-            Etudiant.objects.create(ine=ine, nom=nom, prenom=prenom, filiere="Médecine", niveau="L1", annee_academique="2025-2026", ufr_id="ufr-sds", groupe=groupe_sds_l1)
+        groupe_sds_l1 = Groupe.objects.create(nom="L1 Médecine - Groupe A", filiere="Médecine", niveau="L1", annee_academique="2025-2026", effectif=140, ufr_id="ufr-sds")
         ens_sds = Enseignant.objects.create(nom="Ilboudo", prenom="Salimata")
         EnseignantUfr.objects.create(enseignant=ens_sds, ufr_id="ufr-sds")
         Creneau.objects.create(ue=ue_anat, enseignant=ens_sds, groupe=groupe_sds_l1, salle=salle_sds, jour="jeudi", heure_debut_minutes=8 * 60, heure_fin_minutes=10 * 60, statut="normal")
@@ -165,32 +141,91 @@ class Command(BaseCommand):
         # --- UFR-LAC ---
         ue_lingu = UniteEnseignement.objects.create(code="LAC101", intitule="Linguistique Générale", niveau="L3", ufr_id="ufr-lac")
         salle_lac = Salle.objects.create(nom="Salle 105", batiment="UFR/LAC", capacite=50, type_usage="propre", ufr_id="ufr-lac")
-        groupe_lac_l3 = Groupe.objects.create(nom="L3 Lettres Modernes", filiere="Lettres Modernes", niveau="L3", annee_academique="2023-2024", ufr_id="ufr-lac")
-        for ine, nom, prenom in [("LAC-0001", "Sawadogo", "Nathalie"), ("LAC-0002", "Kabré", "Ousmane")]:
-            Etudiant.objects.create(ine=ine, nom=nom, prenom=prenom, filiere="Lettres Modernes", niveau="L3", annee_academique="2023-2024", ufr_id="ufr-lac", groupe=groupe_lac_l3)
+        groupe_lac_l3 = Groupe.objects.create(nom="L3 Lettres Modernes", filiere="Lettres Modernes", niveau="L3", annee_academique="2023-2024", effectif=35, ufr_id="ufr-lac")
         ens_lac = Enseignant.objects.create(nom="Ouédraogo", prenom="Fatimata")
         EnseignantUfr.objects.create(enseignant=ens_lac, ufr_id="ufr-lac")
         Creneau.objects.create(ue=ue_lingu, enseignant=ens_lac, groupe=groupe_lac_l3, salle=salle_lac, jour="vendredi", heure_debut_minutes=8 * 60, heure_fin_minutes=10 * 60, statut="normal")
+
+        # --- [V3.2] Instituts et école doctorale ---
+        # Un jeu minimal par établissement encore vide, pour que les 12
+        # apparaissent dans la recherche publique. Sans au moins un groupe
+        # ET un créneau, un établissement reste invisible de la cascade
+        # (FR-PUB-02, qui ne propose jamais un chemin sans issue) — et
+        # l'absence de l'IBAM ressemblerait alors à un bug plutôt qu'à une
+        # base non encore remplie par sa scolarité.
+        self.stdout.write("Instituts et école doctorale (jeu minimal de démonstration)...")
+        JOURS_DEMO = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"]
+        for index, (sigle, nom_etab, type_etab, departements) in enumerate(ETABLISSEMENTS):
+            ufr_id = f"ufr-{sigle}"
+            if Groupe.objects.filter(ufr_id=ufr_id).exists():
+                continue  # UFR déjà pourvue par les données pilotes ci-dessus
+
+            departement = departements[0]
+            niveau = "M1" if type_etab == "ecole_doctorale" else "L1"
+            sigle_court = sigle.upper()
+
+            ue = UniteEnseignement.objects.create(
+                code=f"{sigle_court[:4]}101",
+                intitule=f"Introduction — {departement}",
+                niveau=niveau,
+                ufr_id=ufr_id,
+            )
+            salle = Salle.objects.create(
+                nom=f"Salle A — {sigle_court}", batiment=sigle_court, capacite=80, type_usage="propre", ufr_id=ufr_id
+            )
+            groupe = Groupe.objects.create(
+                nom=f"{niveau} {departement} - Groupe A",
+                filiere=departement,
+                niveau=niveau,
+                annee_academique="2025-2026",
+                effectif=60,
+                ufr_id=ufr_id,
+            )
+            enseignant = Enseignant.objects.create(nom="Ouédraogo", prenom=f"Enseignant {sigle_court}")
+            EnseignantUfr.objects.create(enseignant=enseignant, ufr_id=ufr_id)
+            Creneau.objects.create(
+                ue=ue, enseignant=enseignant, groupe=groupe, salle=salle,
+                # Réparti sur la semaine plutôt que tout le lundi 8h : sinon
+                # les 7 établissements se superposeraient sur la même case et
+                # la démonstration donnerait l'impression d'un bug d'affichage.
+                jour=JOURS_DEMO[index % len(JOURS_DEMO)],
+                heure_debut_minutes=8 * 60,
+                heure_fin_minutes=10 * 60,
+                statut="normal",
+            )
 
         # --- Salle DEP (transversale) ---
         Salle.objects.create(nom="Grand Amphithéâtre Central", batiment="Bâtiment Administratif", capacite=800, type_usage="commune", structure_gestionnaire=StructureGestionnaire.DEP, ufr=None)
 
         self.stdout.write('Comptes de connexion (password: "password")...')
-        Utilisateur.objects.create(identifiant="20230145", mot_de_passe_hash=mot_de_passe_hash, nom=aicha_ouedraogo.nom, prenom=aicha_ouedraogo.prenom, role=Role.ETUDIANT, etudiant=aicha_ouedraogo)
-        Utilisateur.objects.create(identifiant="kabore.enseignant", mot_de_passe_hash=mot_de_passe_hash, nom=kabore.nom, prenom=kabore.prenom, role=Role.ENSEIGNANT, enseignant=kabore)
-        # Étudiante de l'UFR-SVT — pour observer l'espace étudiant sur une
-        # UFR autre que la pilote (SEA).
-        Utilisateur.objects.create(identifiant="SVT-0001", mot_de_passe_hash=mot_de_passe_hash, nom=etudiants_svt_l1[0].nom, prenom=etudiants_svt_l1[0].prenom, role=Role.ETUDIANT, etudiant=etudiants_svt_l1[0])
-        # V2 multi-UFR : l'ancien compte unique "scolarite.info" (MVP) se
-        # scinde en un Admin central et un Gestionnaire par UFR. "Savadogo
-        # Rasmata" (identité utilisée comme "auteur" plus bas) devient le
-        # Gestionnaire de l'UFR-SEA, pas l'Admin.
+        # [V3] Plus aucun compte Étudiant ni Enseignant : le programme est
+        # public (FR-PUB-01), il n'y a rien derrière une connexion pour eux.
+        #
+        # [V3.2] UN compte Gestionnaire par établissement — les 12, instituts
+        # et école doctorale compris. Tous sont créés DÉJÀ ACTIVÉS avec le
+        # mot de passe "password", à la demande du porteur de projet, pour
+        # qu'il puisse se connecter à chacun sans passer par l'écran
+        # d'activation. C'est un choix de DÉMONSTRATION : en production,
+        # FR-AUTH-03 impose qu'un compte reste non activé (mot_de_passe_hash
+        # à None) jusqu'à ce que son titulaire choisisse lui-même son mot de
+        # passe — jamais un mot de passe commun connu de tous.
         Utilisateur.objects.create(identifiant="scolarite.general", mot_de_passe_hash=mot_de_passe_hash, nom="Zerbo", prenom="Idrissa", role=Role.ADMIN)
-        Utilisateur.objects.create(identifiant="scolarite.sh", mot_de_passe_hash=mot_de_passe_hash, nom="UFR Sciences Humaines", prenom="Scolarité", role=Role.SCOLARITE, ufr_id="ufr-sh")
-        Utilisateur.objects.create(identifiant="scolarite.sds", mot_de_passe_hash=mot_de_passe_hash, nom="UFR Sciences de la Santé", prenom="Scolarité", role=Role.SCOLARITE, ufr_id="ufr-sds")
-        Utilisateur.objects.create(identifiant="scolarite.svt", mot_de_passe_hash=mot_de_passe_hash, nom="UFR Sciences de la Vie et de la Terre", prenom="Scolarité", role=Role.SCOLARITE, ufr_id="ufr-svt")
-        Utilisateur.objects.create(identifiant="scolarite.sea", mot_de_passe_hash=mot_de_passe_hash, nom="Savadogo", prenom="Rasmata", role=Role.SCOLARITE, ufr_id="ufr-sea")
-        Utilisateur.objects.create(identifiant="scolarite.lac", mot_de_passe_hash=mot_de_passe_hash, nom="UFR Lettres Arts et Communication", prenom="Scolarité", role=Role.SCOLARITE, ufr_id="ufr-lac")
+        Utilisateur.objects.bulk_create(
+            [
+                Utilisateur(
+                    identifiant=f"scolarite.{sigle}",
+                    mot_de_passe_hash=mot_de_passe_hash,
+                    # L'UFR-SEA porte les données pilotes : son compte garde
+                    # la persona de démonstration utilisée comme "auteur"
+                    # dans les entrées d'audit ci-dessous.
+                    nom="Savadogo" if sigle == "sea" else nom,
+                    prenom="Rasmata" if sigle == "sea" else "Scolarité",
+                    role=Role.SCOLARITE,
+                    ufr_id=f"ufr-{sigle}",
+                )
+                for sigle, nom, _, _ in ETABLISSEMENTS
+            ]
+        )
 
         self.stdout.write("Créneaux (un seul jeu de données réconcilié)...")
         c1 = Creneau.objects.create(ue=ue_algo, enseignant=kabore, groupe=groupe_a, salle=amphi_a, jour="lundi", heure_debut_minutes=8 * 60, heure_fin_minutes=10 * 60, statut="normal")
@@ -216,23 +251,51 @@ class Command(BaseCommand):
             creneau_a_id=c_conflit_salle.id, creneau_b_id=c1.id, derogation_motif=derogation_salle, detecte_par="Savadogo Rasmata",
         )
 
-        # FR-CONF-04 : Groupe A compte réellement 8 étudiants — la Salle 6
-        # (6 places) déclenche un vrai avertissement de capacité.
+        # FR-CONF-04 : effectif saisi du Groupe A = 8 — la Salle 6
+        # (6 places) déclenche un vrai avertissement de capacité (RM-02).
         Creneau.objects.create(ue=ue_bdd, enseignant=sawadogo, groupe=groupe_a, salle=salle_6, jour="jeudi", heure_debut_minutes=10 * 60 + 15, heure_fin_minutes=12 * 60, statut="normal")
 
-        self.stdout.write("Demande enseignant (report, en attente)...")
-        DemandeEnseignant.objects.create(
-            enseignant=kabore, type="report", statut="en_attente", creneau_concerne_id=c1.id, motif="Conférence internationale",
-            jour_propose="jeudi", heure_debut_proposee_minutes=8 * 60, heure_fin_proposee_minutes=10 * 60, salle_proposee_id=amphi_a.id,
+        # [V3] FR-EDT-07 : une séance annulée à une date précise, à la
+        # place de l'ancienne "demande enseignant en attente". C'est
+        # exactement le scénario décrit par les responsables : l'enseignant
+        # téléphone pour signaler une absence, le Gestionnaire annule LA
+        # séance concernée, le cours reprend la semaine suivante.
+        self.stdout.write("Séance annulée à une date précise (FR-EDT-07)...")
+        prochain_lundi = aujourdhui + datetime.timedelta(days=(7 - aujourdhui.weekday()) % 7 or 7)
+        SeanceAnnulee.objects.create(
+            creneau=c1, date=prochain_lundi, motif="Conférence internationale — enseignant absent",
+            annule_par="Savadogo Rasmata",
+        )
+        AuditEntry.objects.create(
+            auteur="Savadogo Rasmata",
+            action=f"Annulation séance du {prochain_lundi.isoformat()} — Algorithmique Avancée",
+            motif="Conférence internationale — enseignant absent",
+            creneau_id=c1.id,
         )
 
-        self.stdout.write('\nTerminé. Comptes de démonstration (mot de passe : "password") :')
-        self.stdout.write("  Étudiant (UFR-SEA) 20230145")
-        self.stdout.write("  Étudiant (UFR-SVT) SVT-0001")
-        self.stdout.write("  Enseignant         kabore.enseignant  (intervient à la fois en UFR-SEA et UFR-SVT, FR-REF-06)")
-        self.stdout.write("  Admin              scolarite.general")
-        self.stdout.write("  Gestionnaire (SEA) scolarite.sea  (données pilotes Informatique)")
-        self.stdout.write("  Gestionnaire (SVT) scolarite.svt  (Biologie/Géologie)")
-        self.stdout.write("  Gestionnaire (SH)  scolarite.sh   (Sociologie)")
-        self.stdout.write("  Gestionnaire (SDS) scolarite.sds  (Médecine)")
-        self.stdout.write("  Gestionnaire (LAC) scolarite.lac  (Lettres Modernes)")
+        nb_departements = Departement.objects.count()
+        self.stdout.write(
+            f"\nTerminé. {len(ETABLISSEMENTS)} établissements, {nb_departements} départements."
+        )
+        self.stdout.write('\nComptes (mot de passe : "password", tous déjà activés) :')
+        self.stdout.write("  Admin                       scolarite.general")
+        for sigle, nom, type_etab, departements in ETABLISSEMENTS:
+            prefixe = "UFR/" if type_etab == "ufr" else ""
+            self.stdout.write(
+                f"  Gestionnaire {prefixe + sigle.upper():<12} scolarite.{sigle:<10} "
+                f"{len(departements)} département(s) — {nom}"
+            )
+
+        self.stdout.write("\n  [V3] Le programme se consulte SANS COMPTE, à la racine du site :")
+        self.stdout.write(f"       UFR Sciences Exactes et Appliquées → Informatique → L3 → {groupe_a.nom}")
+        self.stdout.write(f"       Période académique : {debut.isoformat()} → {fin.isoformat()}")
+
+        # Les intitulés de départements viennent du responsable de la
+        # scolarité et sont repris verbatim : rien à confirmer de ce côté
+        # (voir ARBITRAGES dans core/donnees_ujkz.py). Le seul point encore
+        # ouvert vient de nous — les noms complets que nous avons composés
+        # pour les établissements dont la source ne donnait que le sigle.
+        self.stdout.write(
+            f"\n  [V3.2] Noms complets à faire confirmer (composés par nos soins, "
+            f"la source ne donnait que le sigle) : {', '.join(s.upper() for s in NOMS_COMPLETS_A_CONFIRMER)}"
+        )

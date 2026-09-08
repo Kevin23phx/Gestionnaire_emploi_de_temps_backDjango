@@ -14,12 +14,15 @@ def _requis(data: dict, *champs: str) -> None:
 
 
 class EnseignantsView(APIView):
-    """GET lisible par tous les rôles authentifiés (permission par défaut) ;
-    POST réservé à la scolarité (INT-02 : seul point d'entrée de création
-    de compte enseignant, en dehors du seed)."""
+    """GET lisible par tout compte authentifié ; POST réservé à la scolarité.
+
+    [V3] Ne crée plus de compte, seulement une fiche de référentiel — la
+    création de comptes est désormais l'affaire exclusive de `ufr`
+    (INT-02)."""
 
     def get(self, request):
-        enseignants = enseignant_service.list_enseignants()
+        recherche = (request.query_params.get("recherche") or "").strip() or None
+        enseignants = enseignant_service.list_enseignants(recherche)
         return Response({"enseignants": EnseignantSerializer(enseignants, many=True).data})
 
     def get_permissions(self):
@@ -28,14 +31,11 @@ class EnseignantsView(APIView):
         return super().get_permissions()
 
     def post(self, request):
-        _requis(request.data, "nom", "prenom", "identifiant")
-        resultat = enseignant_service.create_enseignant(
-            request.data["nom"], request.data["prenom"], request.data["identifiant"], request.user.ufr_id
+        _requis(request.data, "nom", "prenom")
+        enseignant = enseignant_service.create_enseignant(
+            request.data["nom"], request.data["prenom"], request.user.ufr_id
         )
-        return Response(
-            {"identifiant": resultat["identifiant"], "enseignant": EnseignantSerializer(resultat["enseignant"]).data},
-            status=201,
-        )
+        return Response({"enseignant": EnseignantSerializer(enseignant).data}, status=201)
 
 
 class AffecterUfrView(APIView):

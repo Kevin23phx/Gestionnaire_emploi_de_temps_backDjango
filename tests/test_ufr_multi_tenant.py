@@ -1,8 +1,7 @@
 from django.test import Client, TestCase
 
 from accounts.models import EnseignantUfr, Role, Utilisateur
-from referentiel.models import Etudiant
-from tests.base import creer_compte, creer_enseignant, creer_etudiant, creer_groupe, creer_salle, creer_ue, creer_ufr, login, post_json
+from tests.base import creer_compte, creer_enseignant, creer_groupe, creer_salle, creer_ue, creer_ufr, login, patch_json, post_json
 
 # V2 multi-UFR : INT-07 (un Gestionnaire ne voit/écrit jamais hors de sa
 # propre UFR), INT-08 (un Étudiant n'est jamais dans deux UFR à la fois),
@@ -82,36 +81,38 @@ class UfrMultiTenantTests(TestCase):
         self.assertEqual(res.json()["salle"]["structureGestionnaire"], "DEP")
         self.assertIsNone(res.json()["salle"]["ufrId"])
 
-    # --- Étudiants ---
+    # --- Groupes (effectif saisi, [V3.1]) ---
 
-    def test_importe_un_etudiant_pour_l_ufr_du_gestionnaire(self):
-        res = post_json(self.client_a, "/api/etudiants", {"etudiants": [{"ine": "MT-0001", "nom": "Ouédraogo", "prenom": "Salif", "anneeAcademique": "2025-2026"}]})
-        self.assertEqual(len(res.json()["etudiants"]), 1)
-        self.assertEqual(res.json()["etudiants"][0]["ufrId"], "ufr-a")
+    def test_gestionnaire_modifie_l_effectif_de_son_propre_groupe(self):
+        """L'effectif bouge en cours d'année : sans cette route, la détection
+        de conflit de capacité travaillerait sur la valeur du jour de la
+        création (RM-02)."""
+        res = patch_json(self.client_a, f"/api/groupes/{self.groupe_a.id}", {"effectif": 120})
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["groupe"]["effectif"], 120)
 
-    def test_etudiant_deja_dans_ufr_a_ne_peut_pas_etre_reimporte_par_ufr_b(self):
-        creer_etudiant("MT-0001", "Ouédraogo", "Salif", ufr_id="ufr-a")
-        res = post_json(self.client_b, "/api/etudiants", {"etudiants": [{"ine": "MT-0001", "nom": "Ouédraogo", "prenom": "Salif", "anneeAcademique": "2025-2026"}]})
-        self.assertEqual(res.json()["etudiants"], [])
-        self.assertEqual(res.json()["doublons"], ["MT-0001"])
-        self.assertEqual(Etudiant.objects.get(ine="MT-0001").ufr_id, "ufr-a")
+    def test_gestionnaire_ne_modifie_pas_le_groupe_d_une_autre_ufr(self):
+        """INT-07."""
+        res = patch_json(self.client_b, f"/api/groupes/{self.groupe_a.id}", {"effectif": 999})
+        self.assertEqual(res.status_code, 409)
+        self.groupe_a.refresh_from_db()
+        self.assertNotEqual(self.groupe_a.effectif, 999)
 
-    def test_gestionnaire_b_ne_peut_pas_affecter_un_etudiant_de_ufr_a(self):
-        etu = creer_etudiant("MT-0001", "Ouédraogo", "Salif", ufr_id="ufr-a")
-        res = post_json(self.client_b, "/api/etudiants/affecter", {"etudiantIds": [etu.id], "groupeId": self.groupe_b.id})
-        self.assertEqual(res.status_code, 403)
+    def test_effectif_negatif_refuse(self):
+        """Un effectif négatif désactiverait silencieusement la détection de
+        conflit de capacité, seule chose que cette valeur alimente."""
+        res = patch_json(self.client_a, f"/api/groupes/{self.groupe_a.id}", {"effectif": -5})
+        self.assertEqual(res.status_code, 400)
 
-    def test_gestionnaire_ne_peut_pas_transferer_un_etudiant_d_ufr(self):
-        etu = creer_etudiant("MT-0001", "Ouédraogo", "Salif", ufr_id="ufr-a")
-        res = post_json(self.client_a, f"/api/etudiants/{etu.id}/transferer-ufr", {"ufrId": "ufr-b"})
-        self.assertEqual(res.status_code, 403)
+    def test_effectif_non_numerique_refuse(self):
+        res = patch_json(self.client_a, f"/api/groupes/{self.groupe_a.id}", {"effectif": "beaucoup"})
+        self.assertEqual(res.status_code, 400)
 
-    def test_admin_transfere_un_etudiant_et_reinitialise_son_groupe(self):
-        etu = creer_etudiant("MT-0002", "Transfert", "Test", ufr_id="ufr-a", groupe=self.groupe_a)
-        res = post_json(self.client_admin, f"/api/etudiants/{etu.id}/transferer-ufr", {"ufrId": "ufr-b"})
-        self.assertEqual(res.status_code, 201)
-        self.assertEqual(res.json()["etudiant"]["ufrId"], "ufr-b")
-        self.assertIsNone(res.json()["etudiant"]["groupeId"])
+    def test_un_anonyme_ne_modifie_pas_un_groupe(self):
+        from django.test import Client
+
+        res = patch_json(Client(), f"/api/groupes/{self.groupe_a.id}", {"effectif": 1})
+        self.assertEqual(res.status_code, 401)
 
     # --- Planning ---
 

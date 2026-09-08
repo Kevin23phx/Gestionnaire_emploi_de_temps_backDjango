@@ -2,7 +2,7 @@ from django.test import Client, TestCase
 
 from accounts.models import Role
 from planning.models import Creneau
-from tests.base import creer_compte, creer_enseignant, creer_etudiant, creer_groupe, creer_salle, creer_ue, login, post_json
+from tests.base import creer_compte, creer_enseignant, creer_groupe, creer_salle, creer_ue, login, post_json
 
 
 class PlanningConflictsTests(TestCase):
@@ -52,8 +52,10 @@ class PlanningConflictsTests(TestCase):
 
     def test_conflit_capacite_avertissement_accepte_sans_derogation_bloquante(self):
         petite_salle = creer_salle("Petite Salle", 2)
-        for i in range(5):
-            creer_etudiant(f"CAP-{i}", "Nom", "Prenom", groupe=self.groupe1)
+        # [V3.1] L'effectif est saisi sur le groupe, plus compté : RM-02
+        # compare cette valeur à la capacité de la salle.
+        self.groupe1.effectif = 5
+        self.groupe1.save(update_fields=["effectif"])
         candidat = self._creneau(self.ue1, self.ens1, self.groupe1, petite_salle, "jeudi", "08:00", "09:00")
         res = post_json(self.client_sco, "/api/creneaux", {"creneaux": [candidat]})
         # Un avertissement de capacité seul n'empêche PAS la sauvegarde côté

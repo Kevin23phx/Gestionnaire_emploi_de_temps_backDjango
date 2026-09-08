@@ -1,21 +1,25 @@
 from rest_framework import serializers
 
-from referentiel.models import Etudiant, Groupe, Salle, UniteEnseignement
+from referentiel.models import Departement, Groupe, Salle, UniteEnseignement
 
 
 class GroupeSerializer(serializers.ModelSerializer):
     anneeAcademique = serializers.CharField(source="annee_academique")
     ufrId = serializers.CharField(source="ufr_id")
-    effectif = serializers.SerializerMethodField()
 
     class Meta:
         model = Groupe
+        # [V3.1] "effectif" est une colonne du modèle : plus de
+        # SerializerMethodField, plus de COUNT à recalculer.
         fields = ["id", "nom", "filiere", "niveau", "anneeAcademique", "ufrId", "effectif"]
 
-    def get_effectif(self, obj) -> int:
-        # Annoté par la queryset du service (annotate(effectif=Count(...)))
-        # quand disponible ; recalculé sinon (ex. juste après une création).
-        return getattr(obj, "effectif", None) if getattr(obj, "effectif", None) is not None else obj.etudiants.count()
+
+class DepartementSerializer(serializers.ModelSerializer):
+    ufrId = serializers.CharField(source="ufr_id")
+
+    class Meta:
+        model = Departement
+        fields = ["id", "libelle", "ufrId"]
 
 
 class SalleSerializer(serializers.ModelSerializer):
@@ -35,12 +39,3 @@ class UniteEnseignementSerializer(serializers.ModelSerializer):
         model = UniteEnseignement
         fields = ["id", "code", "intitule", "niveau", "ufrId"]
 
-
-class EtudiantSerializer(serializers.ModelSerializer):
-    anneeAcademique = serializers.CharField(source="annee_academique")
-    ufrId = serializers.CharField(source="ufr_id")
-    groupeId = serializers.CharField(source="groupe_id", allow_null=True)
-
-    class Meta:
-        model = Etudiant
-        fields = ["id", "ine", "nom", "prenom", "filiere", "niveau", "anneeAcademique", "ufrId", "groupeId"]

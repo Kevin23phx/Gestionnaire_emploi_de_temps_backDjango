@@ -38,10 +38,9 @@ INSTALLED_APPS = [
     "ufr",
     "referentiel",
     "planning",
+    "public",
     "conflict_engine",
     "audit",
-    "demandes",
-    "notifications",
     "dashboard",
     "sync",
 ]
@@ -114,7 +113,9 @@ APPEND_SLASH = False
 # distinctes : credentials (cookie cm_session) doivent être explicitement
 # autorisés, comme app.enableCors({credentials: true}) côté NestJS.
 # ---------------------------------------------------------------------------
-CORS_ALLOWED_ORIGINS = [os.environ.get("ALLOWED_ORIGIN", "http://localhost:3000")]
+# Liste séparée par des virgules (ex. accès depuis un téléphone sur le même
+# réseau local, en plus de localhost) — voir ALLOWED_ORIGIN dans .env.
+CORS_ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("ALLOWED_ORIGIN", "http://localhost:3000").split(",") if o.strip()]
 CORS_ALLOW_CREDENTIALS = True
 
 # ---------------------------------------------------------------------------
@@ -138,4 +139,12 @@ REST_FRAMEWORK = {
     "UNAUTHENTICATED_USER": None,
 }
 
-NOTIFICATION_SENDER = os.environ.get("NOTIFICATION_SENDER", "console")
+# [V3] Canal d'alerte Web Push (FR-PUB-08). "console" par défaut : sans
+# clés VAPID configurées, tout le système fonctionne — programme public,
+# favoris, abonnement agenda — et les alertes sont simplement journalisées.
+# Générer une paire : `venv/bin/vapid --gen` (py-vapid, installé avec
+# pywebpush), puis renseigner les deux variables ci-dessous.
+PUSH_SENDER = os.environ.get("PUSH_SENDER", "console")
+VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY", "")
+VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "")
+VAPID_SUBJECT = os.environ.get("VAPID_SUBJECT", "mailto:scolarite@ujkz.bf")

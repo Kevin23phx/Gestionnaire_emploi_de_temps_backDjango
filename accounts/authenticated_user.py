@@ -1,18 +1,19 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
 class AuthenticatedUser:
     """Ce que CookieSessionAuthentication attache à chaque requête, re-lu
     depuis la base à chaque appel (jamais mis en cache dans le cookie) —
-    garantit INV-03 et une cohérence immédiate si un étudiant change de
-    groupe en cours de session (INT-06).
+    garantit INV-03 et une cohérence immédiate si le périmètre du compte
+    change en cours de session.
 
     "ufr_id" : périmètre du compte lui-même (non-null SSI role="scolarite",
-    INV-10). "enseignant_ufr_ids" : calculé une fois ici à partir
-    d'EnseignantUfr (FR-REF-06) pour éviter à chaque vue de refaire la
-    jointure — voir core/ufr_scope.py pour la résolution du périmètre à
-    partir de ces deux champs.
+    INV-10) — voir core/ufr_scope.py pour la résolution du périmètre.
+
+    [V3] Les champs "etudiant", "enseignant" et "enseignant_ufr_ids" ont
+    disparu avec les rôles correspondants : un compte n'est plus jamais
+    l'ombre d'une fiche de référentiel.
     """
 
     id: str
@@ -21,9 +22,6 @@ class AuthenticatedUser:
     prenom: str
     role: str
     ufr_id: str | None
-    enseignant_ufr_ids: list[str] = field(default_factory=list)
-    etudiant: object | None = None
-    enseignant: object | None = None
 
     is_authenticated: bool = True
     is_anonymous: bool = False
