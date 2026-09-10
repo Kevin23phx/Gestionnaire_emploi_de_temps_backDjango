@@ -1,7 +1,7 @@
 from django.test import Client, TestCase
 
 from accounts.models import EnseignantUfr, Role, Utilisateur
-from tests.base import creer_compte, creer_enseignant, creer_groupe, creer_salle, creer_ue, creer_ufr, login, patch_json, post_json
+from tests.base import jour, creer_compte, creer_enseignant, creer_groupe, creer_salle, creer_ue, creer_ufr, login, patch_json, post_json
 
 # V2 multi-UFR : INT-07 (un Gestionnaire ne voit/écrit jamais hors de sa
 # propre UFR), INT-08 (un Étudiant n'est jamais dans deux UFR à la fois),
@@ -124,7 +124,7 @@ class UfrMultiTenantTests(TestCase):
         res = post_json(
             self.client_a,
             "/api/creneaux",
-            {"creneaux": [{"ueId": ue.id, "enseignantId": ens.id, "groupeId": self.groupe_b.id, "salleId": salle.id, "jour": "lundi", "heureDebut": "08:00", "heureFin": "10:00"}]},
+            {"creneaux": [{"ueId": ue.id, "enseignantId": ens.id, "groupeId": self.groupe_b.id, "salleId": salle.id, "date": jour("lundi").isoformat(), "heureDebut": "08:00", "heureFin": "10:00"}]},
         )
         self.assertEqual(res.status_code, 403)
 
@@ -139,7 +139,7 @@ class UfrMultiTenantTests(TestCase):
         res = post_json(
             self.client_a,
             "/api/creneaux",
-            {"creneaux": [{"ueId": ue.id, "enseignantId": ens_externe.id, "groupeId": self.groupe_a.id, "salleId": salle.id, "jour": "samedi", "heureDebut": "08:00", "heureFin": "09:00"}]},
+            {"creneaux": [{"ueId": ue.id, "enseignantId": ens_externe.id, "groupeId": self.groupe_a.id, "salleId": salle.id, "date": jour("samedi").isoformat(), "heureDebut": "08:00", "heureFin": "09:00"}]},
         )
         self.assertEqual(res.status_code, 201)
         self.assertTrue(EnseignantUfr.objects.filter(enseignant=ens_externe, ufr_id="ufr-a").exists())
@@ -168,7 +168,7 @@ class UfrMultiTenantTests(TestCase):
         res = post_json(
             self.client_b,
             "/api/creneaux",
-            {"creneaux": [{"ueId": ue.id, "enseignantId": ens.id, "groupeId": self.groupe_b.id, "salleId": salle.id, "jour": "vendredi", "heureDebut": "08:00", "heureFin": "10:00"}]},
+            {"creneaux": [{"ueId": ue.id, "enseignantId": ens.id, "groupeId": self.groupe_b.id, "salleId": salle.id, "date": jour("vendredi").isoformat(), "heureDebut": "08:00", "heureFin": "10:00"}]},
         )
         self.assertEqual(res.status_code, 201)
 

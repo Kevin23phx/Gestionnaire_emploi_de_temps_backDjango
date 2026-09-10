@@ -11,7 +11,7 @@ import datetime
 
 from django.test import Client, TestCase
 
-from planning.models import Creneau, SeanceAnnulee
+from planning.models import Creneau
 from tests.base import (
     creer_enseignant,
     creer_groupe,
@@ -33,7 +33,10 @@ class CalendrierIcsTests(TestCase):
         self.enseignant = creer_enseignant("Traoré", "Moussa")
         self.creneau = Creneau.objects.create(
             ue=self.ue, enseignant=self.enseignant, groupe=self.groupe, salle=self.salle,
-            jour="lundi", heure_debut_minutes=8 * 60, heure_fin_minutes=10 * 60,
+            # Une date à venir : le fantôme d'un cours déplacé n'a de sens
+            # que tant que quelqu'un peut encore se présenter à l'ancienne
+            # case, il disparaît une fois la date passée.
+            date=prochain("lundi"), heure_debut_minutes=8 * 60, heure_fin_minutes=10 * 60,
         )
         self.anonyme = Client()
 
@@ -75,71 +78,79 @@ class CalendrierIcsTests(TestCase):
         self.assertIn(f"UID:{self.creneau.id}@campus-manager.ujkz", avant)
         self.assertIn(f"UID:{self.creneau.id}@campus-manager.ujkz", apres)
 
-    def test_la_recurrence_s_arrete_a_la_fin_de_la_periode_academique(self):
-        """FR-REF-16 : sans borne, le cours se répéterait indéfiniment dans
-        l'agenda du visiteur, pour toujours."""
-        ics = self._ics()
-        fin = (datetime.date.today() + datetime.timedelta(days=120)).strftime("%Y%m%d")
-        self.assertIn(f"RRULE:FREQ=WEEKLY;UNTIL={fin}T235900", ics)
+    def test_chaque_seance_est_un_evenement_date_autonome(self):
+        """[V4] Ni RRULE, ni RECURRENCE-ID : le programme est publié semaine
+        par semaine, chaque séance vaut pour sa date et pour elle seule.
 
-    def test_une_seance_annulee_est_reecrite_et_non_retiree(self):
-        """INV-15 / FR-PUB-07 : le réflexe serait un EXDATE, qui la ferait
-        disparaître proprement de l'agenda — et l'étudiant se déplacerait
-        quand même, sans avoir rien remarqué."""
-        date = prochain("lundi")
-        SeanceAnnulee.objects.create(creneau=self.creneau, date=date, motif="Absence", annule_par="Test")
+        C'est ce qui a réglé le défaut le plus visible de la V3 — un cours
+        répété à l'identique pendant les vacances, parce que le modèle
+        supposait un emploi du temps arrêté pour tout le semestre."""
         ics = self._ics()
+        self.assertNotIn("RRULE", ics)
+        self.assertNotIn("RECURRENCE-ID", ics)
+        self.assertIn(f"DTSTART;TZID={{}}:{self.creneau.date.strftime('%Y%m%d')}T080000".format("Africa/Ouagadougou"), ics)
 
-        self.assertNotIn("EXDATE", ics)
-        self.assertIn("RECURRENCE-ID", ics)
+    def test_une_semaine_non_publiee_ne_produit_aucun_evenement(self):
+        """Une semaine sans programme est une semaine sans cours — pas une
+        grille vide à expliquer, pas un trou à combler."""
+        ics = self._ics()
+        semaine_suivante = (self.creneau.date + datetime.timedelta(days=7)).strftime("%Y%m%d")
+        self.assertNotIn(semaine_suivante, ics)
+
+    def test_une_seance_annulee_reste_dans_le_flux(self):
+        """INV-15 : la retirer serait le plus sûr moyen que l'étudiant se
+        déplace quand même."""
+        Creneau.objects.filter(id=self.creneau.id).update(statut="annule", motif="Absence enseignant")
+        ics = self._ics()
         self.assertIn("SUMMARY:ANNULÉ — Bases de Données", ics)
-        self.assertIn("Absence", ics)
-        # Jamais CANCELLED sur l'occurrence : la plupart des agendas
-        # masquent un événement annulé, ce qui reviendrait à l'effacer.
-        occurrence = [e for e in evenements(ics) if "RECURRENCE-ID" in e][0]
-        self.assertIn("STATUS:CONFIRMED", occurrence)
+        self.assertIn("Absence enseignant", ics)
+        # Jamais CANCELLED : la plupart des agendas masquent un événement
+        # annulé, ce qui reviendrait à effacer l'information.
+        self.assertIn("STATUS:CONFIRMED", ics)
+        self.assertIn("TRANSP:TRANSPARENT", ics)
 
     def test_une_seance_annulee_porte_une_alarme(self):
         """C'est elle qui fait sonner le téléphone — sans quoi l'agenda reste
         un affichage passif que l'étudiant doit penser à consulter."""
-        date = prochain("lundi")
-        SeanceAnnulee.objects.create(creneau=self.creneau, date=date, motif="Absence", annule_par="Test")
-        occurrence = [e for e in evenements(self._ics()) if "RECURRENCE-ID" in e][0]
-        self.assertIn("BEGIN:VALARM", occurrence)
-        self.assertIn("TRIGGER:-PT2H", occurrence)
+        Creneau.objects.filter(id=self.creneau.id).update(statut="annule", motif="Absence")
+        evenement = evenements(self._ics())[0]
+        self.assertIn("BEGIN:VALARM", evenement)
+        self.assertIn("TRIGGER:-PT2H", evenement)
 
-    def test_un_cours_deplace_laisse_un_fantome_a_l_ancien_horaire(self):
+    def test_un_cours_deplace_laisse_un_fantome_a_l_ancienne_case(self):
         """FR-PUB-07 : un déplacement est le changement le plus dangereux —
-        l'événement bouge et personne ne remarque rien."""
+        l'événement bouge dans l'agenda et personne ne remarque rien."""
         from django.utils import timezone
 
+        ancienne = self.creneau.date
         Creneau.objects.filter(id=self.creneau.id).update(
-            jour="jeudi", ancien_jour="lundi",
-            ancien_heure_debut_minutes=8 * 60, ancien_heure_fin_minutes=10 * 60,
+            date=ancienne + datetime.timedelta(days=2),
+            ancienne_date=ancienne,
+            ancien_heure_debut_minutes=8 * 60,
+            ancien_heure_fin_minutes=10 * 60,
             deplace_le=timezone.now(),
         )
         ics = self._ics()
         self.assertIn(f"UID:{self.creneau.id}-deplace@campus-manager.ujkz", ics)
         self.assertIn("SUMMARY:DÉPLACÉ — Bases de Données", ics)
-        self.assertIn("jeudi", ics)
 
-    def test_le_fantome_disparait_au_bout_d_une_semaine(self):
-        """Au-delà, l'habitude est prise et le fantôme devient du bruit."""
+    def test_le_fantome_disparait_une_fois_l_ancienne_date_passee(self):
+        """Au-delà, il n'avertit plus personne et devient du bruit."""
         from django.utils import timezone
 
         Creneau.objects.filter(id=self.creneau.id).update(
-            jour="jeudi", ancien_jour="lundi",
-            ancien_heure_debut_minutes=8 * 60, ancien_heure_fin_minutes=10 * 60,
-            deplace_le=timezone.now() - datetime.timedelta(days=10),
+            ancienne_date=datetime.date.today() - datetime.timedelta(days=3),
+            ancien_heure_debut_minutes=8 * 60,
+            ancien_heure_fin_minutes=10 * 60,
+            deplace_le=timezone.now(),
         )
         self.assertNotIn("-deplace@campus-manager.ujkz", self._ics())
 
     def test_les_separateurs_sont_echappes_dans_les_motifs(self):
         """RFC 5545 §3.3.11 : une virgule non échappée couperait l'événement
         en deux, sans le moindre message d'erreur."""
-        date = prochain("lundi")
-        SeanceAnnulee.objects.create(
-            creneau=self.creneau, date=date, motif="Absence, maladie; certificat fourni", annule_par="Test"
+        Creneau.objects.filter(id=self.creneau.id).update(
+            statut="annule", motif="Absence, maladie; certificat fourni"
         )
         ics = self._ics().replace("\r\n ", "")  # dépliage des lignes
-        self.assertIn(r"Absence\, maladie\; certificat fourni", ics)
+        self.assertIn("Absence" + chr(92) + ", maladie" + chr(92) + "; certificat fourni", ics)

@@ -15,6 +15,13 @@ class JourSemaine(models.TextChoices):
     SAMEDI = "samedi"
 
 
+# Index 0 = lundi (datetime.date.weekday()). Le dimanche (index 6) est
+# volontairement absent : il n'y a pas cours le dimanche à l'UJKZ, et une
+# date qui tomberait ce jour-là est refusée à la saisie plutôt que rangée
+# dans une septième case que personne ne regarde.
+JOURS_SEMAINE = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"]
+
+
 class StatutCreneau(models.TextChoices):
     NORMAL = "normal"
     MODIFIE = "modifie"
@@ -53,7 +60,20 @@ class Creneau(models.Model):
     groupe = models.ForeignKey(Groupe, related_name="creneaux", on_delete=models.PROTECT)
     salle = models.ForeignKey(Salle, related_name="creneaux", on_delete=models.PROTECT)
 
-    jour = models.CharField(max_length=16, choices=JourSemaine.choices)
+    # [V4] Une DATE réelle, plus un jour de semaine récurrent.
+    #
+    # À l'UJKZ, l'emploi du temps n'est pas fixé pour le semestre : il est
+    # publié semaine par semaine, en fin de semaine précédente, et le contenu
+    # change d'une semaine à l'autre (cette semaine Maths, la suivante
+    # Algorithmique). Le modèle « jour de semaine + récurrence », hérité des
+    # universités où le programme est arrêté pour tout un semestre, ne
+    # pouvait pas représenter ça : il produisait un cours répété à
+    # l'identique de la rentrée aux examens, vacances comprises.
+    #
+    # Le jour de la semaine reste utile pour l'affichage — il se DÉDUIT de la
+    # date (voir la propriété `jour`), il n'est plus stocké : deux champs
+    # pour la même information finissent toujours par diverger.
+    date = models.DateField()
     heure_debut_minutes = models.PositiveIntegerField()
     heure_fin_minutes = models.PositiveIntegerField()
 
@@ -70,26 +90,33 @@ class Creneau(models.Model):
     # tout en ne transmettant jamais le seul message qui compte.
     version = models.PositiveIntegerField(default=1)
 
-    # [V3] FR-PUB-07 : trace du dernier déplacement d'horaire, et rien
-    # d'autre. Quand un cours change de jour ou d'heure, l'événement se
-    # contente de bouger dans l'agenda du visiteur — un déplacement est
-    # silencieux par nature, l'étudiant continue de venir à l'ancienne
-    # heure. Ces trois champs permettent de laisser une semaine durant un
-    # événement "fantôme" à l'ancien créneau, qui dit où le cours est parti.
-    # Écrasés à chaque nouveau déplacement : on ne garde jamais qu'un seul
-    # ancien horaire, le plus récent, parce que c'est le seul auquel
-    # quelqu'un puisse encore se présenter.
-    ancien_jour = models.CharField(max_length=16, choices=JourSemaine.choices, null=True, blank=True)
+    # [V3] FR-PUB-07 : trace du dernier déplacement, et rien d'autre. Quand
+    # un cours change de date ou d'heure, l'événement se contente de bouger
+    # dans l'agenda du visiteur — un déplacement est silencieux par nature,
+    # l'étudiant continue de venir à l'ancienne heure. Ces champs permettent
+    # de laisser un événement "fantôme" à l'ancienne case, qui dit où le
+    # cours est parti. Écrasés à chaque nouveau déplacement : on ne garde
+    # jamais qu'un seul ancien horaire, le plus récent, parce que c'est le
+    # seul auquel quelqu'un puisse encore se présenter.
+    ancienne_date = models.DateField(null=True, blank=True)
     ancien_heure_debut_minutes = models.PositiveIntegerField(null=True, blank=True)
     ancien_heure_fin_minutes = models.PositiveIntegerField(null=True, blank=True)
     deplace_le = models.DateTimeField(null=True, blank=True)
 
+    @property
+    def jour(self) -> str:
+        """Jour de la semaine, déduit de la date. Dimanche n'apparaît jamais
+        dans un programme : la validation refuse cette date en amont."""
+        return JOURS_SEMAINE[self.date.weekday()]
+
     class Meta:
         db_table = "creneau"
         indexes = [
-            models.Index(fields=["salle", "jour"]),
-            models.Index(fields=["enseignant", "jour"]),
-            models.Index(fields=["groupe", "jour"]),
+            models.Index(fields=["salle", "date"]),
+            models.Index(fields=["enseignant", "date"]),
+            # Le plus sollicité de tous : afficher le programme d'un groupe
+            # pour une semaine donnée, côté public comme côté gestion.
+            models.Index(fields=["groupe", "date"]),
         ]
         constraints = [
             # INT-03 : un créneau modifié/annulé sans motif est rejeté — la
@@ -107,45 +134,6 @@ class Creneau(models.Model):
             # *_creneau_exclude_constraint) : trop spécifique à PostgreSQL
             # pour être exprimé proprement via l'API déclarative de Meta.
         ]
-
-
-class SeanceAnnulee(models.Model):
-    """[V3] FR-EDT-07 / INV-14 / RM-10 : annulation d'UNE séance à une date
-    précise ("l'enseignant est absent mardi prochain"), sur un créneau qui
-    reste actif pour toutes ses autres dates.
-
-    Modèle distinct, et non un statut de plus sur Creneau : ce sont deux
-    objets de nature différente. `Creneau.statut = "annule"` retire le cours
-    du programme pour toute la période académique ; une SeanceAnnulee le
-    suspend pour une occurrence et une seule. Les confondre reviendrait à
-    supprimer un cours du semestre entier chaque fois qu'un enseignant
-    téléphone pour signaler une absence ponctuelle — c'est précisément le
-    cas d'usage le plus fréquent depuis que le circuit de demandes a été
-    retiré (cf. 02_SRS §2.7).
-    """
-
-    id = models.CharField(primary_key=True, max_length=64, default=generate_id, editable=False)
-    creneau = models.ForeignKey(Creneau, related_name="seances_annulees", on_delete=models.CASCADE)
-    date = models.DateField()
-    motif = models.TextField()
-    annule_par = models.CharField(max_length=255)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        db_table = "seance_annulee"
-        indexes = [models.Index(fields=["creneau", "date"])]
-        constraints = [
-            # Annuler deux fois la même séance n'a pas de sens et produirait
-            # deux exceptions concurrentes dans le flux calendrier.
-            models.UniqueConstraint(fields=["creneau", "date"], name="seance_annulee_unique"),
-            # INT-03 : comme pour un créneau, jamais d'annulation muette.
-            models.CheckConstraint(
-                condition=~models.Q(motif=""), name="seance_annulee_motif_requis"
-            ),
-        ]
-
-    def __str__(self) -> str:
-        return f"{self.creneau_id} annulée le {self.date}"
 
 
 class ConflitJournal(models.Model):

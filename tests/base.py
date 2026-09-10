@@ -24,31 +24,35 @@ def hash_mot_de_passe_test() -> str:
     return _hash_partage
 
 
-# [V3] Toute UFR de test porte une période académique englobant la date du
-# jour : sans elle, une annulation datée serait rejetée par INT-11 et le flux
-# calendrier n'aurait aucune borne de récurrence (FR-REF-16).
-PERIODE_TEST = {
-    "periode_libelle": "Semestre de test",
-    "periode_debut": datetime.date.today() - datetime.timedelta(days=30),
-    "periode_fin": datetime.date.today() + datetime.timedelta(days=120),
-}
-
-
 def ufr_par_defaut() -> str:
-    Ufr.objects.get_or_create(id="ufr-test", defaults={"nom": "UFR Test", "sigle": "test", **PERIODE_TEST})
+    Ufr.objects.get_or_create(id="ufr-test", defaults={"nom": "UFR Test", "sigle": "test"})
     return "ufr-test"
 
 
 def creer_ufr(ufr_id: str, nom: str, sigle: str) -> Ufr:
-    return Ufr.objects.create(id=ufr_id, nom=nom, sigle=sigle, **PERIODE_TEST)
+    return Ufr.objects.create(id=ufr_id, nom=nom, sigle=sigle)
 
 
-def prochain(jour: str, apres: datetime.date | None = None) -> datetime.date:
-    """Prochaine date tombant sur ce jour de semaine — les tests d'annulation
-    datée ont besoin d'une date réelle et cohérente avec le jour du créneau."""
-    index = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"].index(jour)
+JOURS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"]
+
+
+def lundi_courant() -> datetime.date:
+    """[V4] Le lundi de la semaine en cours — point de départ des dates de
+    test. Les créneaux portent désormais une date réelle, plus un jour de
+    semaine : les tests doivent donc en fabriquer une."""
+    auj = datetime.date.today()
+    return auj - datetime.timedelta(days=auj.weekday())
+
+
+def jour(nom: str, semaine: datetime.date | None = None) -> datetime.date:
+    """Date réelle d'un jour de la semaine visée (celle en cours par défaut)."""
+    return (semaine or lundi_courant()) + datetime.timedelta(days=JOURS.index(nom))
+
+
+def prochain(nom: str, apres: datetime.date | None = None) -> datetime.date:
+    """Prochaine occurrence de ce jour, strictement après la date donnée."""
     depart = apres or datetime.date.today()
-    return depart + datetime.timedelta(days=(index - depart.weekday()) % 7 or 7)
+    return depart + datetime.timedelta(days=(JOURS.index(nom) - depart.weekday()) % 7 or 7)
 
 
 def creer_ue(intitule: str, code: str = "COD1", ufr_id: str | None = None, niveau: str = "L3") -> UniteEnseignement:

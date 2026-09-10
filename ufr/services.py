@@ -26,14 +26,6 @@ def list_ufrs():
                 # "IBAM"), composée côté serveur pour n'exister qu'une fois.
                 "type": u.type,
                 "sigleAffiche": u.sigle_affiche,
-                # [V3] FR-REF-16 : la période accompagne l'UFR partout où
-                # celle-ci circule. Trois écrans en dépendent — la carte du
-                # tableau de bord Gestionnaire, les bornes de navigation par
-                # semaine du planning, et la colonne de supervision Admin —
-                # et aucun n'a de second endroit où aller la chercher.
-                "periodeLibelle": u.periode_libelle,
-                "periodeDebut": u.periode_debut.isoformat() if u.periode_debut else None,
-                "periodeFin": u.periode_fin.isoformat() if u.periode_fin else None,
                 "gestionnaire": (
                     {"identifiant": gestionnaire.identifiant, "active": gestionnaire.mot_de_passe_hash is not None}
                     if gestionnaire
@@ -83,40 +75,3 @@ def create_gestionnaire(ufr_id: str, nom: str, prenom: str, auteur: str) -> dict
     audit_services.record(auteur, f"Création compte Gestionnaire — {identifiant} ({ufr.nom})")
 
     return {"identifiant": identifiant, "ufr": ufr}
-
-
-@transaction.atomic
-def definir_periode(ufr_id: str, libelle: str | None, debut: str, fin: str, auteur: str) -> Ufr:
-    """[V3] FR-REF-16/17 : le Gestionnaire déclare la période académique EN
-    COURS de sa propre UFR — jamais celle d'une autre (INT-07, vérifié par
-    l'appelant), et jamais une valeur globale à l'université (FR-REF-17 : les
-    UFR de l'UJKZ ne rentrent pas toutes le même jour).
-
-    Tracé à l'audit : déplacer la fin de période raccourcit ou allonge d'un
-    coup tous les flux calendrier de l'UFR, ce qui se voit chez chaque
-    étudiant abonné. Ce n'est pas un réglage anodin.
-    """
-    try:
-        debut_date = datetime.date.fromisoformat(debut)
-        fin_date = datetime.date.fromisoformat(fin)
-    except (TypeError, ValueError):
-        raise ValidationError("Dates invalides (format attendu : AAAA-MM-JJ).")
-    if fin_date <= debut_date:
-        raise ValidationError("La fin de période doit être après son début.")
-
-    try:
-        ufr = Ufr.objects.get(id=ufr_id)
-    except Ufr.DoesNotExist:
-        raise NotFound("UFR introuvable.")
-
-    ufr.periode_libelle = (libelle or "").strip() or None
-    ufr.periode_debut = debut_date
-    ufr.periode_fin = fin_date
-    ufr.save(update_fields=["periode_libelle", "periode_debut", "periode_fin"])
-
-    audit_services.record(
-        auteur,
-        f"Période académique — {ufr.sigle}",
-        f"{ufr.periode_libelle or 'Période'} : {debut_date.isoformat()} → {fin_date.isoformat()}",
-    )
-    return ufr

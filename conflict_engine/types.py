@@ -8,7 +8,7 @@ class CandidateCreneau:
     jamais une colonne mais toujours une valeur calculée fournie ici)."""
 
     id: str
-    jour: str
+    date: str  # [V4] ISO — deux cours ne s'opposent que s'ils sont le MÊME JOUR, pas le même jour de semaine
     heure_debut_minutes: int
     heure_fin_minutes: int
     statut: str

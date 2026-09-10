@@ -10,8 +10,9 @@ import json
 
 from django.test import Client, TestCase
 
-from planning.models import Creneau, SeanceAnnulee
+from planning.models import Creneau
 from tests.base import (
+    jour,
     creer_enseignant,
     creer_groupe,
     creer_salle,
@@ -34,7 +35,7 @@ class SurfacePubliqueTests(TestCase):
 
         self.creneau = Creneau.objects.create(
             ue=self.ue, enseignant=self.enseignant, groupe=self.groupe, salle=self.salle,
-            jour="lundi", heure_debut_minutes=8 * 60, heure_fin_minutes=10 * 60,
+            date=jour("lundi"), heure_debut_minutes=8 * 60, heure_fin_minutes=10 * 60,
         )
         self.anonyme = Client()
 
@@ -111,23 +112,28 @@ class SurfacePubliqueTests(TestCase):
     def test_une_seance_annulee_reste_visible_et_signalee(self):
         """INV-15 : la faire disparaître priverait l'étudiant de
         l'information même qu'on cherche à lui transmettre."""
-        date = prochain("lundi")
-        SeanceAnnulee.objects.create(creneau=self.creneau, date=date, motif="Absence enseignant", annule_par="Test")
+        Creneau.objects.filter(id=self.creneau.id).update(statut="annule", motif="Absence enseignant")
 
-        res = self.anonyme.get(f"/api/public/programme/{self.groupe.id}?semaine={date.isoformat()}")
+        res = self.anonyme.get(f"/api/public/programme/{self.groupe.id}?semaine={self.creneau.date.isoformat()}")
         seances = res.json()["seances"]
         self.assertEqual(len(seances), 1)
-        self.assertEqual(seances[0]["statut"], "annule_seance")
+        self.assertEqual(seances[0]["statut"], "annule")
         self.assertEqual(seances[0]["motif"], "Absence enseignant")
 
-    def test_l_annulation_ne_vaut_que_pour_sa_date(self):
-        """INV-14 : la semaine suivante, le cours a de nouveau lieu."""
-        date = prochain("lundi")
-        SeanceAnnulee.objects.create(creneau=self.creneau, date=date, motif="Absence", annule_par="Test")
-
+    def test_l_annulation_ne_touche_que_sa_propre_semaine(self):
+        """[V4] Chaque semaine est un programme distinct : annuler le cours
+        d'une semaine ne dit rien de la suivante, qui a son propre
+        programme — publié séparément."""
         import datetime
 
-        suivante = date + datetime.timedelta(days=7)
+        suivante = self.creneau.date + datetime.timedelta(days=7)
+        Creneau.objects.create(
+            ue=self.creneau.ue, enseignant=self.creneau.enseignant, groupe=self.groupe,
+            salle=self.creneau.salle, date=suivante,
+            heure_debut_minutes=8 * 60, heure_fin_minutes=10 * 60,
+        )
+        Creneau.objects.filter(id=self.creneau.id).update(statut="annule", motif="Absence")
+
         res = self.anonyme.get(f"/api/public/programme/{self.groupe.id}?semaine={suivante.isoformat()}")
         self.assertEqual(res.json()["seances"][0]["statut"], "normal")
 
@@ -165,11 +171,10 @@ class SurfacePubliqueEtablissementsTests(TestCase):
 
     def setUp(self):
         from core.models import TypeEtablissement, Ufr
-        from tests.base import PERIODE_TEST
 
         Ufr.objects.create(
             id="ufr-ibam", nom="Institut Burkinabè des Arts et Métiers", sigle="ibam",
-            type=TypeEtablissement.INSTITUT, **PERIODE_TEST,
+            type=TypeEtablissement.INSTITUT,
         )
         self.groupe_institut = creer_groupe("L1 Gestion - Groupe A", filiere="Gestion", niveau="L1", ufr_id="ufr-ibam")
         Creneau.objects.create(
@@ -177,7 +182,7 @@ class SurfacePubliqueEtablissementsTests(TestCase):
             enseignant=creer_enseignant("Sanou", "Adama", ufr_id="ufr-ibam"),
             groupe=self.groupe_institut,
             salle=creer_salle("Salle IBAM", 80, ufr_id="ufr-ibam"),
-            jour="lundi", heure_debut_minutes=8 * 60, heure_fin_minutes=10 * 60,
+            date=jour("lundi"), heure_debut_minutes=8 * 60, heure_fin_minutes=10 * 60,
         )
         # Une UFR avec un groupe, pour comparer les deux formes de sigle
         # dans la même réponse — la cascade ne liste que les établissements
@@ -188,7 +193,7 @@ class SurfacePubliqueEtablissementsTests(TestCase):
             enseignant=creer_enseignant("Kaboré", "Ismaël"),
             groupe=groupe_ufr,
             salle=creer_salle("Salle Test", 80),
-            jour="mardi", heure_debut_minutes=8 * 60, heure_fin_minutes=10 * 60,
+            date=jour("mardi"), heure_debut_minutes=8 * 60, heure_fin_minutes=10 * 60,
         )
         self.anonyme = Client()
 

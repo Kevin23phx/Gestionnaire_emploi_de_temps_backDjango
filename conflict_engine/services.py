@@ -14,7 +14,10 @@ from core.time_utils import minutes_to_hhmm
 
 
 def _chevauchent(a: CandidateCreneau, b: CandidateCreneau) -> bool:
-    if a.jour != b.jour:
+    # [V4] Comparaison sur la DATE : deux cours du lundi ne se gênent que
+    # s'il s'agit du même lundi. Avec l'ancien modèle récurrent, la question
+    # ne se posait pas — tous les lundis étaient le même.
+    if a.date != b.date:
         return False
     return a.heure_debut_minutes < b.heure_fin_minutes and b.heure_debut_minutes < a.heure_fin_minutes
 
@@ -31,7 +34,7 @@ def evaluate(
     for autre in autres:
         if not _chevauchent(candidat, autre):
             continue
-        plage = f"{candidat.jour} {minutes_to_hhmm(candidat.heure_debut_minutes)}-{minutes_to_hhmm(candidat.heure_fin_minutes)}"
+        plage = f"{candidat.date} {minutes_to_hhmm(candidat.heure_debut_minutes)}-{minutes_to_hhmm(candidat.heure_fin_minutes)}"
 
         if candidat.salle_id == autre.salle_id:
             conflits.append(
@@ -68,7 +71,7 @@ def evaluate(
             )
 
     if candidat.groupe_effectif > candidat.salle_capacite:
-        plage = f"{candidat.jour} {minutes_to_hhmm(candidat.heure_debut_minutes)}-{minutes_to_hhmm(candidat.heure_fin_minutes)}"
+        plage = f"{candidat.date} {minutes_to_hhmm(candidat.heure_debut_minutes)}-{minutes_to_hhmm(candidat.heure_fin_minutes)}"
         conflits.append(
             ConflitDetecteResult(
                 type="capacite",

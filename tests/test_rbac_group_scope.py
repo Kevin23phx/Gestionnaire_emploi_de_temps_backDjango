@@ -3,6 +3,7 @@ from django.test import Client, TestCase
 from accounts.models import Role
 from planning.models import Creneau
 from tests.base import (
+    jour,
     creer_compte,
     creer_enseignant,
     creer_groupe,
@@ -38,8 +39,8 @@ class PerimetreLectureTests(TestCase):
         creer_compte("scolarite.test", "Savadogo", "Rasmata", Role.SCOLARITE)
         creer_compte("scolarite.b", "Gestionnaire", "B", Role.SCOLARITE, ufr_id="ufr-b")
 
-        Creneau.objects.create(ue=self.ue, enseignant=self.ens_a, groupe=self.groupe_a, salle=self.salle, jour="lundi", heure_debut_minutes=8 * 60, heure_fin_minutes=10 * 60)
-        Creneau.objects.create(ue=self.ue, enseignant=self.ens_b, groupe=self.groupe_b, salle=self.salle, jour="mardi", heure_debut_minutes=8 * 60, heure_fin_minutes=10 * 60)
+        Creneau.objects.create(ue=self.ue, enseignant=self.ens_a, groupe=self.groupe_a, salle=self.salle, date=jour("lundi"), heure_debut_minutes=8 * 60, heure_fin_minutes=10 * 60)
+        Creneau.objects.create(ue=self.ue, enseignant=self.ens_b, groupe=self.groupe_b, salle=self.salle, date=jour("mardi"), heure_debut_minutes=8 * 60, heure_fin_minutes=10 * 60)
 
         self.client_sco = Client()
         login(self.client_sco, "scolarite.test")

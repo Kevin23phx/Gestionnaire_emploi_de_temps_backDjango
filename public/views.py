@@ -83,7 +83,11 @@ class CalendrierView(APIView):
         # Un abonnement n'est pas un téléchargement : pas de
         # Content-Disposition attachment, qui ferait proposer au visiteur
         # d'enregistrer un fichier figé au lieu de s'abonner.
-        reponse["Cache-Control"] = "public, max-age=900"
+        # 5 minutes : assez pour absorber une rafale de requêtes, assez court
+        # pour ne pas ajouter notre propre latence à celle, bien plus longue,
+        # du fournisseur d'agenda (FR-NOTIF-05). Générer ce flux coûte une
+        # requête SQL — il n'y a rien à gagner à le garder plus longtemps.
+        reponse["Cache-Control"] = "public, max-age=300"
         return reponse
 
 

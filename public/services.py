@@ -98,36 +98,29 @@ def get_groupe_public(groupe_id: str) -> Groupe:
         raise NotFound("Ce programme n'existe plus. Refaites une recherche.")
 
 
-def _projeter_creneau(creneau: Creneau, date: datetime.date) -> dict:
+def _projeter_creneau(creneau: Creneau) -> dict:
     """LA liste blanche. Tout ce qui sort de la surface publique passe ici.
 
     Ne contient que ce que FR-PUB-03 énumère : UE, enseignant, salle,
     horaire, statut, motif. Pas d'effectif, pas d'identifiant de groupe
     d'étudiant, rien qui puisse remonter jusqu'à une personne inscrite.
     """
-    annulation = next((sa for sa in creneau.seances_annulees.all() if sa.date == date), None)
-
-    if annulation is not None:
-        # INV-15 : la séance reste dans le programme, signalée. La faire
-        # disparaître serait le plus sûr moyen que l'étudiant se déplace
-        # quand même.
-        statut, motif = "annule_seance", annulation.motif
-    elif creneau.statut == "annule":
-        statut, motif = "annule", creneau.motif
-    else:
-        statut, motif = creneau.statut, creneau.motif
-
+    # [V4] Plus de distinction « séance annulée » / « cours annulé » : un
+    # créneau EST une séance datée, l'annuler n'annule que celle-là.
+    # INV-15 tient toujours : elle reste dans le programme, signalée, plutôt
+    # que de disparaître — la faire disparaître serait le plus sûr moyen que
+    # l'étudiant se déplace quand même.
     return {
         "id": creneau.id,
-        "date": date.isoformat(),
+        "date": creneau.date.isoformat(),
         "jour": creneau.jour,
         "heureDebut": minutes_to_hhmm(creneau.heure_debut_minutes),
         "heureFin": minutes_to_hhmm(creneau.heure_fin_minutes),
         "ue": {"code": creneau.ue.code, "intitule": creneau.ue.intitule, "niveau": creneau.ue.niveau},
         "enseignant": f"{creneau.enseignant.prenom} {creneau.enseignant.nom}".strip(),
         "salle": {"nom": creneau.salle.nom, "batiment": creneau.salle.batiment},
-        "statut": statut,
-        "motif": motif,
+        "statut": creneau.statut,
+        "motif": creneau.motif,
     }
 
 
@@ -140,17 +133,18 @@ def programme_semaine(groupe_id: str, semaine: str | None) -> dict:
         except ValueError:
             raise ValidationError("Semaine invalide (format attendu : AAAA-MM-JJ).")
     else:
-        lundi = _semaine_par_defaut(groupe.ufr)
+        lundi = _semaine_par_defaut(groupe_id)
 
+    # [V4] Filtré sur la semaine demandée. Le programme est publié semaine
+    # par semaine : une semaine sans créneau est une semaine sans cours, pas
+    # une erreur.
+    samedi = lundi + datetime.timedelta(days=5)
     creneaux = (
-        Creneau.objects.filter(groupe_id=groupe_id)
+        Creneau.objects.filter(groupe_id=groupe_id, date__gte=lundi, date__lte=samedi)
         .select_related("ue", "enseignant", "salle")
-        .prefetch_related("seances_annulees")
-        .order_by("heure_debut_minutes")
+        .order_by("date", "heure_debut_minutes")
     )
-
-    seances = [_projeter_creneau(c, lundi + datetime.timedelta(days=JOURS_INDEX[c.jour])) for c in creneaux]
-    seances.sort(key=lambda s: (s["date"], s["heureDebut"]))
+    seances = [_projeter_creneau(c) for c in creneaux]
 
     ufr = groupe.ufr
     return {
@@ -174,25 +168,33 @@ def programme_semaine(groupe_id: str, semaine: str | None) -> dict:
             # Les bornes de navigation viennent de la période académique de
             # l'UFR (FR-REF-16) : on ne laisse pas le visiteur feuilleter
             # indéfiniment des semaines où rien n'a jamais été programmé.
-            "periodeDebut": ufr.periode_debut.isoformat() if ufr.periode_debut else None,
-            "periodeFin": ufr.periode_fin.isoformat() if ufr.periode_fin else None,
-            "periodeLibelle": ufr.periode_libelle,
-            "horsPeriode": bool(
-                ufr.periode_definie and not (ufr.periode_debut <= lundi + datetime.timedelta(days=5) and lundi <= ufr.periode_fin)
-            ),
+            # [V4] Aucune borne : les dates de semestre ont disparu avec la
+            # récurrence. Le visiteur navigue librement ; une semaine sans
+            # programme le dit simplement.
+            "publie": bool(seances),
         },
         "seances": seances,
     }
 
 
-def _semaine_par_defaut(ufr: Ufr) -> datetime.date:
-    """La semaine courante — sauf si l'on est hors période académique, auquel
-    cas on ouvre sur la première semaine de la période plutôt que sur une
-    grille vide qui laisserait croire que le programme n'existe pas."""
+def _semaine_par_defaut(groupe_id: str) -> datetime.date:
+    """[V4] La semaine courante si elle a un programme ; sinon la prochaine
+    semaine publiée.
+
+    À l'UJKZ le programme sort en fin de semaine pour la suivante : un
+    étudiant qui consulte le samedi doit tomber sur ce qui vient d'être
+    publié, pas sur une grille vide qui lui laisserait croire qu'il n'y a
+    rien. À défaut de semaine à venir, on retombe sur la dernière publiée
+    plutôt que sur du vide."""
     aujourdhui = datetime.date.today()
-    if ufr.periode_definie:
-        if aujourdhui < ufr.periode_debut:
-            return lundi_de(ufr.periode_debut)
-        if aujourdhui > ufr.periode_fin:
-            return lundi_de(ufr.periode_fin)
-    return lundi_de(aujourdhui)
+    semaine = lundi_de(aujourdhui)
+    if Creneau.objects.filter(
+        groupe_id=groupe_id, date__gte=semaine, date__lte=semaine + datetime.timedelta(days=5)
+    ).exists():
+        return semaine
+
+    prochaine = Creneau.objects.filter(groupe_id=groupe_id, date__gt=aujourdhui).order_by("date").first()
+    if prochaine:
+        return lundi_de(prochaine.date)
+    derniere = Creneau.objects.filter(groupe_id=groupe_id).order_by("-date").first()
+    return lundi_de(derniere.date) if derniere else semaine

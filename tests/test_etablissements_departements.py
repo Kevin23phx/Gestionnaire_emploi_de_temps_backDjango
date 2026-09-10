@@ -7,6 +7,8 @@ restriction est bien levée et que le cloisonnement INT-07, lui, ne l'est
 pas.
 """
 
+import json
+
 from django.test import Client, TestCase
 
 from accounts.models import Role
@@ -172,3 +174,113 @@ class CreationEtablissementTests(TestCase):
     def test_type_inconnu_refuse(self):
         res = post_json(self.client_admin, "/api/ufrs", {"nom": "X", "sigle": "xx", "type": "faculte"})
         self.assertEqual(res.status_code, 400)
+
+
+class CoherenceSeedTests(TestCase):
+    """[V3.3] La filière d'un groupe doit être un département officiel.
+
+    Quatre groupes du seed portaient une filière absente du référentiel
+    (« Biologie » au lieu de « Biochimie et microbiologie », « Médecine »
+    accentué au lieu de « Medecine »...). Elles apparaissaient dans la
+    recherche publique **à côté** du département officiel, donnant à voir
+    deux entrées quasi identiques — exactement ce qu'un visiteur interprète
+    comme un doublon, alors que la cause était une incohérence du seed.
+
+    Ce test relit le seed lui-même : c'est le seul endroit où l'écart peut
+    être attrapé, la base ne contraignant pas `Groupe.filiere` (chaîne
+    dénormalisée volontaire, cf. referentiel/models.py).
+    """
+
+    def test_toute_filiere_seedee_est_un_departement_officiel(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        from referentiel.models import Departement, Groupe
+
+        call_command("seed", stdout=StringIO())
+
+        officiels = {(d.ufr_id, d.libelle) for d in Departement.objects.all()}
+        ecarts = [
+            f"{g.nom} ({g.ufr_id}) → filière {g.filiere!r} absente du référentiel"
+            for g in Groupe.objects.all()
+            if (g.ufr_id, g.filiere) not in officiels
+        ]
+        self.assertEqual(ecarts, [], "\n".join(ecarts))
+
+
+class CoursDepartementsTests(TestCase):
+    """[V3.3] Un cours est rattaché à un ou plusieurs départements.
+
+    Le cas « plusieurs » est le seul qui justifie la relation multiple : un
+    tronc commun dispensé à quatre départements devrait sinon être ressaisi
+    quatre fois, et la question « quels départements suivent ce cours ? »
+    resterait sans réponse.
+    """
+
+    def setUp(self):
+        ufr_par_defaut()
+        creer_ufr("ufr-b", "Institut B", "b")
+        self.info = Departement.objects.create(ufr_id="ufr-test", libelle="Informatique")
+        self.physique = Departement.objects.create(ufr_id="ufr-test", libelle="Physique")
+        self.chez_b = Departement.objects.create(ufr_id="ufr-b", libelle="Démographie")
+
+        creer_compte("scolarite.test", "Savadogo", "Rasmata", Role.SCOLARITE)
+        self.client_sco = Client()
+        login(self.client_sco, "scolarite.test")
+
+    def test_cree_un_cours_mutualise(self):
+        res = post_json(
+            self.client_sco,
+            "/api/cours",
+            {"intitule": "Mathématiques", "niveau": "L1", "departementIds": [self.info.id, self.physique.id]},
+        )
+        self.assertEqual(res.status_code, 201)
+        libelles = sorted(d["libelle"] for d in res.json()["ue"]["departements"])
+        self.assertEqual(libelles, ["Informatique", "Physique"])
+
+    def test_un_cours_sans_departement_reste_possible(self):
+        """Comme l'effectif à zéro : accepté, mais l'écran le signale. Refuser
+        bloquerait la saisie d'un cours dont le rattachement n'est pas encore
+        arbitré."""
+        res = post_json(self.client_sco, "/api/cours", {"intitule": "Cours orphelin", "niveau": "L2"})
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(res.json()["ue"]["departements"], [])
+
+    def test_impossible_de_rattacher_un_departement_d_un_autre_etablissement(self):
+        """INT-07 : les identifiants viennent du client, les valider côté
+        serveur est le seul garde-fou."""
+        res = post_json(
+            self.client_sco,
+            "/api/cours",
+            {"intitule": "Cours hors périmètre", "niveau": "L1", "departementIds": [self.chez_b.id]},
+        )
+        self.assertEqual(res.status_code, 400)
+
+    def test_rattacher_un_cours_existant(self):
+        """Les cours créés avant la V3.3 n'ont aucun département : sans route
+        de modification, il faudrait les supprimer — ce que le référentiel
+        interdit dès qu'un créneau les référence."""
+        cree = post_json(self.client_sco, "/api/cours", {"intitule": "Ancien cours", "niveau": "L3"}).json()["ue"]
+        res = self.client_sco.patch(
+            f"/api/cours/{cree['id']}",
+            data=json.dumps({"departementIds": [self.info.id]}),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual([d["libelle"] for d in res.json()["ue"]["departements"]], ["Informatique"])
+
+    def test_le_rattachement_remplace_et_n_ajoute_pas(self):
+        """`set()` et non `add()` : décocher un département dans l'interface
+        doit réellement le retirer."""
+        cree = post_json(
+            self.client_sco,
+            "/api/cours",
+            {"intitule": "Cours évolutif", "niveau": "L1", "departementIds": [self.info.id, self.physique.id]},
+        ).json()["ue"]
+        res = self.client_sco.patch(
+            f"/api/cours/{cree['id']}",
+            data=json.dumps({"departementIds": [self.info.id]}),
+            content_type="application/json",
+        )
+        self.assertEqual([d["libelle"] for d in res.json()["ue"]["departements"]], ["Informatique"])

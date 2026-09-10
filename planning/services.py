@@ -13,7 +13,7 @@ from conflict_engine.types import CandidateCreneau
 from core.exceptions_helpers import Conflict, ConflictWithBody
 from core.time_utils import hhmm_to_minutes, minutes_to_hhmm
 from core.ufr_scope import resolve_ufr_scope
-from planning.models import Creneau, ConflitJournal, SeanceAnnulee
+from planning.models import JOURS_SEMAINE, Creneau, ConflitJournal
 from public import diffusion
 from referentiel.models import Groupe, Salle, UniteEnseignement
 
@@ -24,7 +24,6 @@ from referentiel.models import Groupe, Salle, UniteEnseignement
 # write_one_in_transaction, qui n'existait que pour lui, part avec.
 
 CRENEAU_SELECT_RELATED = ("ue", "enseignant", "salle", "groupe")
-CRENEAU_PREFETCH = ("seances_annulees",)
 
 
 def _effectifs_par_groupe(groupe_ids: list[str]) -> dict[str, int]:
@@ -57,6 +56,9 @@ def _denormaliser(creneau: Creneau, effectif: int) -> dict:
             "ufrId": creneau.salle.ufr_id,
             "typeUsage": creneau.salle.type_usage,
         },
+        # [V4] La date réelle. "jour" reste fourni pour l'affichage, mais il
+        # est DÉDUIT de la date côté modèle — jamais stocké deux fois.
+        "date": creneau.date.isoformat(),
         "jour": creneau.jour,
         "heureDebut": minutes_to_hhmm(creneau.heure_debut_minutes),
         "heureFin": minutes_to_hhmm(creneau.heure_fin_minutes),
@@ -66,14 +68,6 @@ def _denormaliser(creneau: Creneau, effectif: int) -> dict:
         # permet de savoir qu'un créneau affiché est périmé sans comparer
         # champ à champ.
         "version": creneau.version,
-        # [V3] FR-EDT-08 : les annulations datées accompagnent toujours le
-        # créneau, jamais un appel séparé — sans quoi une grille pourrait
-        # s'afficher un instant sans elles et laisser croire que le cours a
-        # lieu. Le prefetch est fait par l'appelant (CRENEAU_PREFETCH).
-        "seancesAnnulees": [
-            {"date": sa.date.isoformat(), "motif": sa.motif, "annulePar": sa.annule_par}
-            for sa in creneau.seances_annulees.all()
-        ],
     }
 
 
@@ -122,7 +116,7 @@ def list_creneaux(user, groupe_id_filtre=None, enseignant_id_filtre=None, ufr_id
             | Q(groupe__nom__unaccent__icontains=recherche)
         )
 
-    creneaux = list(qs.select_related(*CRENEAU_SELECT_RELATED).prefetch_related(*CRENEAU_PREFETCH))
+    creneaux = list(qs.select_related(*CRENEAU_SELECT_RELATED))
     effectifs = _effectifs_par_groupe([c.groupe_id for c in creneaux])
     return [_denormaliser(c, effectifs.get(c.groupe_id, 0)) for c in creneaux]
 
@@ -130,12 +124,27 @@ def list_creneaux(user, groupe_id_filtre=None, enseignant_id_filtre=None, ufr_id
 def find_one(creneau_id: str) -> dict:
     try:
         creneau = (
-            Creneau.objects.select_related(*CRENEAU_SELECT_RELATED).prefetch_related(*CRENEAU_PREFETCH).get(id=creneau_id)
+            Creneau.objects.select_related(*CRENEAU_SELECT_RELATED).get(id=creneau_id)
         )
     except Creneau.DoesNotExist:
         raise NotFound("Créneau introuvable.")
     effectif = _effectifs_par_groupe([creneau.groupe_id]).get(creneau.groupe_id, 0)
     return _denormaliser(creneau, effectif)
+
+
+def _valider_date(valeur) -> datetime.date:
+    """[V4] Une date réelle, jamais un dimanche.
+
+    Il n'y a pas cours le dimanche à l'UJKZ. Refuser ici plutôt que de ranger
+    la séance dans une septième colonne que la grille n'affiche pas : le
+    Gestionnaire croirait avoir programmé un cours qui n'apparaît nulle part."""
+    try:
+        date = datetime.date.fromisoformat(valeur)
+    except (TypeError, ValueError):
+        raise ValidationError("Date invalide (format attendu : AAAA-MM-JJ).")
+    if date.weekday() >= len(JOURS_SEMAINE):
+        raise ValidationError("Il n'y a pas cours le dimanche.")
+    return date
 
 
 def _valider_horaire(heure_debut_minutes: int, heure_fin_minutes: int) -> None:
@@ -153,7 +162,7 @@ def _charger_candidats(exclude_id: str | None = None) -> list[CandidateCreneau]:
     return [
         CandidateCreneau(
             id=c.id,
-            jour=c.jour,
+            date=c.date.isoformat(),
             heure_debut_minutes=c.heure_debut_minutes,
             heure_fin_minutes=c.heure_fin_minutes,
             statut=c.statut,
@@ -192,7 +201,7 @@ def _construire_candidat(item: dict, statut: str, heure_debut_minutes: int, heur
 
     candidat = CandidateCreneau(
         id=item.get("id") or f"temp-{uuid.uuid4().hex}",
-        jour=item["jour"],
+        date=item["date"],
         heure_debut_minutes=heure_debut_minutes,
         heure_fin_minutes=heure_fin_minutes,
         statut=statut,
@@ -219,6 +228,7 @@ def _ecrire_un(item: dict, auteur: str, contexte: list[CandidateCreneau], user=N
     if statut != "normal" and not (item.get("motif") or "").strip():
         raise ValidationError("Le motif est obligatoire pour modifier ou annuler un créneau.")
 
+    date = _valider_date(item.get("date"))
     heure_debut_minutes = hhmm_to_minutes(item["heureDebut"])
     heure_fin_minutes = hhmm_to_minutes(item["heureFin"])
     _valider_horaire(heure_debut_minutes, heure_fin_minutes)
@@ -262,9 +272,9 @@ def _ecrire_un(item: dict, auteur: str, contexte: list[CandidateCreneau], user=N
         # qui passe inaperçu dans un agenda — l'événement bouge, sans rien
         # dire. On mémorise l'ancienne case pour y laisser un fantôme
         # pendant une semaine (voir public/ical.py).
-        if existant.jour != item["jour"] or existant.heure_debut_minutes != heure_debut_minutes:
+        if existant.date != date or existant.heure_debut_minutes != heure_debut_minutes:
             deplacement = dict(
-                ancien_jour=existant.jour,
+                ancienne_date=existant.date,
                 ancien_heure_debut_minutes=existant.heure_debut_minutes,
                 ancien_heure_fin_minutes=existant.heure_fin_minutes,
                 deplace_le=timezone.now(),
@@ -279,7 +289,7 @@ def _ecrire_un(item: dict, auteur: str, contexte: list[CandidateCreneau], user=N
         enseignant_id=item["enseignantId"],
         groupe_id=item["groupeId"],
         salle_id=item["salleId"],
-        jour=item["jour"],
+        date=date,
         heure_debut_minutes=heure_debut_minutes,
         heure_fin_minutes=heure_fin_minutes,
         statut=statut,
@@ -317,7 +327,7 @@ def _ecrire_un(item: dict, auteur: str, contexte: list[CandidateCreneau], user=N
         creneau_id=creneau_id,
         action=action,
         ue_intitule=refs["ue_intitule"],
-        jour=item["jour"],
+        date=date.isoformat(),
         heure_debut=item["heureDebut"],
         heure_fin=item["heureFin"],
         salle_nom=refs["salle_nom"],
@@ -398,7 +408,7 @@ def charger_comme_dto(creneau_id: str) -> dict:
         "enseignantId": existant.enseignant_id,
         "groupeId": existant.groupe_id,
         "salleId": existant.salle_id,
-        "jour": existant.jour,
+        "date": existant.date.isoformat(),
         "heureDebut": minutes_to_hhmm(existant.heure_debut_minutes),
         "heureFin": minutes_to_hhmm(existant.heure_fin_minutes),
         "statut": existant.statut,
@@ -419,116 +429,10 @@ def annuler(creneau_id: str, motif: str, auteur: str, user) -> str:
         "enseignantId": existant.enseignant_id,
         "groupeId": existant.groupe_id,
         "salleId": existant.salle_id,
-        "jour": existant.jour,
+        "date": existant.date.isoformat(),
         "heureDebut": minutes_to_hhmm(existant.heure_debut_minutes),
         "heureFin": minutes_to_hhmm(existant.heure_fin_minutes),
         "statut": "annule",
         "motif": motif,
     }
     return write_one(item, auteur, user)
-
-
-# ---------------------------------------------------------------------------
-# [V3] Annulation d'une séance à une date précise (FR-EDT-07 / INV-14 / RM-10)
-# ---------------------------------------------------------------------------
-# Le cas d'usage devenu le plus fréquent : un enseignant téléphone au
-# Gestionnaire pour signaler qu'il sera absent tel jour. Avant la V3, la
-# seule réponse possible était `annuler()`, qui retire le cours du programme
-# pour TOUTE la période — le Gestionnaire devait ensuite le recréer à la
-# main. Les deux opérations coexistent désormais et ne se confondent pas.
-
-
-def _creneau_du_gestionnaire(creneau_id: str, user) -> Creneau:
-    """INT-07 : un Gestionnaire n'agit jamais sur le créneau d'une autre UFR.
-    Facteur commun aux deux opérations sur les séances, pour qu'aucune ne
-    puisse être ajoutée demain en oubliant le contrôle."""
-    try:
-        creneau = Creneau.objects.select_related("groupe__ufr", "ue").get(id=creneau_id)
-    except Creneau.DoesNotExist:
-        raise NotFound("Créneau introuvable.")
-    if user.role == "scolarite" and creneau.groupe.ufr_id != user.ufr_id:
-        raise PermissionDenied("Ce créneau appartient à une autre UFR.")
-    return creneau
-
-
-JOURS_INDEX = {"lundi": 0, "mardi": 1, "mercredi": 2, "jeudi": 3, "vendredi": 4, "samedi": 5}
-
-
-@transaction.atomic
-def annuler_seance(creneau_id: str, date_iso: str, motif: str, auteur: str, user) -> dict:
-    if not (motif or "").strip():
-        raise ValidationError("Le motif est obligatoire pour annuler une séance.")
-
-    creneau = _creneau_du_gestionnaire(creneau_id, user)
-
-    try:
-        date = datetime.date.fromisoformat(date_iso)
-    except (TypeError, ValueError):
-        raise ValidationError("Date invalide (format attendu : AAAA-MM-JJ).")
-
-    # Une annulation datée doit tomber sur un jour où le cours a réellement
-    # lieu, sinon elle ne suspend rien et laisse croire au Gestionnaire que
-    # l'absence est traitée.
-    if date.weekday() != JOURS_INDEX[creneau.jour]:
-        raise ValidationError(f"Ce créneau a lieu le {creneau.jour}, pas le {date.isoformat()}.")
-
-    # INT-11 : on n'annule pas une séance qui n'a jamais été programmée.
-    ufr = creneau.groupe.ufr
-    if ufr.periode_definie and not (ufr.periode_debut <= date <= ufr.periode_fin):
-        raise ValidationError(
-            f"Cette date est hors de la période académique de l'UFR "
-            f"({ufr.periode_debut.isoformat()} → {ufr.periode_fin.isoformat()})."
-        )
-
-    # ERR-09 : annuler une séance d'un créneau déjà annulé pour toute la
-    # période est sans objet — le refuser plutôt que d'enregistrer une
-    # annulation d'annulation que personne ne saurait interpréter ensuite.
-    if creneau.statut == "annule":
-        raise ValidationError("Ce créneau est déjà annulé pour toute la période académique.")
-
-    _, cree = SeanceAnnulee.objects.get_or_create(
-        creneau=creneau, date=date, defaults={"motif": motif.strip(), "annule_par": auteur}
-    )
-    if not cree:
-        raise Conflict("Cette séance est déjà annulée.")
-
-    # Le créneau lui-même n'est pas touché (INV-14), mais sa révision monte :
-    # son flux calendrier vient de changer, et sans cet incrément les agendas
-    # déjà abonnés ignoreraient l'annulation.
-    Creneau.objects.filter(id=creneau_id).update(version=F("version") + 1)
-
-    audit_services.record(
-        auteur, f"Annulation séance du {date.isoformat()} — {creneau.ue.intitule}", motif.strip(), creneau_id
-    )
-    diffusion.on_seance_annulee(
-        creneau_id=creneau_id,
-        groupe_id=creneau.groupe_id,
-        ue_intitule=creneau.ue.intitule,
-        date=date.isoformat(),
-    )
-    return find_one(creneau_id)
-
-
-@transaction.atomic
-def retablir_seance(creneau_id: str, date_iso: str, auteur: str, user) -> dict:
-    """Rétablir une séance annulée par erreur. Symétrique d'annuler_seance —
-    et non une suppression silencieuse : l'audit garde la trace des deux
-    opérations, comme pour toute écriture de planning (INV-04)."""
-    creneau = _creneau_du_gestionnaire(creneau_id, user)
-    try:
-        date = datetime.date.fromisoformat(date_iso)
-    except (TypeError, ValueError):
-        raise ValidationError("Date invalide (format attendu : AAAA-MM-JJ).")
-
-    supprimees, _ = SeanceAnnulee.objects.filter(creneau_id=creneau_id, date=date).delete()
-    if not supprimees:
-        raise NotFound("Aucune annulation enregistrée pour cette séance.")
-
-    Creneau.objects.filter(id=creneau_id).update(version=F("version") + 1)
-    audit_services.record(
-        auteur, f"Rétablissement séance du {date.isoformat()} — {creneau.ue.intitule}", None, creneau_id
-    )
-    diffusion.on_seance_annulee(
-        creneau_id=creneau_id, groupe_id=creneau.groupe_id, ue_intitule=creneau.ue.intitule, date=date.isoformat()
-    )
-    return find_one(creneau_id)

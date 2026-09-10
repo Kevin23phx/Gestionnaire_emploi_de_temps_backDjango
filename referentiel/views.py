@@ -116,6 +116,21 @@ class CoursView(APIView):
     def post(self, request):
         _requis(request.data, "intitule", "niveau")
         ue = cours_service.create_cours(
-            request.data["intitule"], request.data.get("code"), request.data["niveau"], request.user.ufr_id
+            request.data["intitule"],
+            request.data.get("code"),
+            request.data["niveau"],
+            request.user.ufr_id,
+            request.data.get("departementIds"),
         )
         return Response({"ue": UniteEnseignementSerializer(ue).data}, status=201)
+
+
+class CoursDetailView(APIView):
+    """[V3.3] Modification d'un cours — en pratique surtout le rattachement à
+    ses départements, que les cours antérieurs à cette version n'ont pas."""
+
+    permission_classes = [require_roles("scolarite")]
+
+    def patch(self, request, cours_id: str):
+        ue = cours_service.update_cours(cours_id, request.data, request.user)
+        return Response({"ue": UniteEnseignementSerializer(ue).data})

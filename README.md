@@ -42,6 +42,42 @@ n'aurait signalé que ce sérialiseur a un pied dehors. Ici, la liste des
 champs publiés est écrite en toutes lettres dans `public/services.py`, à un
 seul endroit (INV-12, INT-10, NFR-SEC-03).
 
+### `[V4]` Le programme est publié semaine par semaine (2026-09-09)
+
+**Le changement de modèle le plus important du projet.** Jusqu'ici, un
+`Creneau` portait un *jour de semaine* et se répétait pour tout un semestre —
+hypothèse héritée des universités à programme semestriel. À l'UJKZ, c'est
+l'inverse : l'emploi du temps sort en fin de semaine pour la semaine à venir,
+et son contenu change d'une semaine à l'autre.
+
+Le défaut se voyait dès le premier abonnement à un agenda réel : un cours
+répété à l'identique de la rentrée aux examens, **vacances comprises**, sans
+aucun moyen d'y remédier.
+
+`Creneau.date` est donc une **date réelle**. Le jour de semaine reste
+disponible pour l'affichage mais il est **dérivé** (`Creneau.jour`), jamais
+stocké : deux champs pour la même information finissent toujours par diverger.
+
+Ce qui disparaît avec la récurrence, et c'est une simplification nette :
+
+| Supprimé | Pourquoi |
+|---|---|
+| `RRULE` dans le flux iCalendar | Chaque séance est un événement daté autonome |
+| Période académique (`Ufr.periode_*`) | Plus rien à borner — et ces dates « varient souvent », personne ne pouvait les tenir à jour pour 12 établissements |
+| Modèle `SeanceAnnulee` | Annuler la séance du 14 = annuler le créneau du 14 |
+| Congés à exclure | Une semaine sans cours est une semaine sans programme publié |
+
+**Le point sensible de la migration** (`planning.0004_v4_creneau_date`) est la
+contrainte PostgreSQL anti-double-réservation (INV-02) : elle portait sur
+`jour`, une colonne supprimée. Elle est **reconstruite sur `date`**, et sa
+portée change en conséquence — deux cours dans la même salle un lundi ne
+s'excluent plus que s'il s'agit du même lundi. C'est correct sous le nouveau
+modèle et ça l'aurait été faux sous l'ancien.
+
+Le dimanche est refusé à la saisie (`_valider_date`) : il n'y a pas cours ce
+jour-là, et l'accepter rangerait la séance dans une colonne que la grille
+n'affiche pas.
+
 ### `[V3.2]` 12 établissements, pas 5 UFR (2026-09-07)
 
 Le référentiel officiel de l'UJKZ, reçu le 2026-09-07, recense **12
@@ -186,7 +222,7 @@ Comptes créés (mot de passe `password` pour tous) : voir la sortie du script
 bash scripts/test.sh
 ```
 
-109 tests (`tests/`) couvrant l'authentification, le RBAC par rôle, le
+96 tests (`tests/`) couvrant l'authentification, le RBAC par rôle, le
 cloisonnement multi-UFR (création d'UFR/Gestionnaire, isolation du
 référentiel/planning/audit entre UFR, affectation automatique d'un
 enseignant jamais bloquante), le moteur de détection de conflits (salle,

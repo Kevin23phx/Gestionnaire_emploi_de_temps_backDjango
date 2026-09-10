@@ -40,6 +40,8 @@ def _envoyer(abonnements, charge: dict) -> None:
         logger.info("[push:console] %s destinataire(s) — %s", len(abonnements), charge["titre"])
         return
 
+    envoyees = 0
+
     from pywebpush import WebPushException, webpush
 
     perimes = []
@@ -54,6 +56,7 @@ def _envoyer(abonnements, charge: dict) -> None:
                 vapid_private_key=settings.VAPID_PRIVATE_KEY,
                 vapid_claims={"sub": settings.VAPID_SUBJECT},
             )
+            envoyees += 1
         except WebPushException as exc:
             # 404/410 = l'appareil a désinstallé la PWA ou révoqué la
             # permission. L'abonnement ne redeviendra jamais valide : le
@@ -70,6 +73,18 @@ def _envoyer(abonnements, charge: dict) -> None:
     if perimes:
         AbonnementAlerte.objects.filter(id__in=perimes).delete()
 
+    # Journalisé systématiquement, succès comme échec : c'est la seule trace
+    # qu'une alerte est partie. Sans elle, « les étudiants ont-ils été
+    # prévenus ? » n'a pas de réponse vérifiable.
+    manquees = len(abonnements) - envoyees
+    if manquees:
+        logger.warning(
+            "Alerte « %s » : %s/%s destinataire(s) atteint(s), %s manqué(s) (%s abonnement(s) périmé(s) purgé(s))",
+            charge["titre"], envoyees, len(abonnements), manquees, len(perimes),
+        )
+    else:
+        logger.info("Alerte « %s » remise à %s destinataire(s)", charge["titre"], envoyees)
+
 
 def _abonnes(groupe_ids: list[str]):
     ids = [g for g in groupe_ids if g]
@@ -83,7 +98,7 @@ def on_creneau_changed(
     creneau_id: str,
     action: str,
     ue_intitule: str,
-    jour: str,
+    date: str,
     heure_debut: str,
     heure_fin: str,
     salle_nom: str,
@@ -91,7 +106,7 @@ def on_creneau_changed(
     groupe_id: str,
     groupe_id_precedent: str | None = None,
 ) -> None:
-    plage = f"{jour} {heure_debut}-{heure_fin}"
+    plage = f"{date} {heure_debut}-{heure_fin}"
     if action == "annulation":
         titre, corps = "Cours annulé", f"{ue_intitule} annulé ({plage})."
     elif action == "modification":
@@ -110,16 +125,4 @@ def on_creneau_changed(
     _envoyer(
         _abonnes([groupe_id, groupe_id_precedent]),
         {"titre": titre, "corps": corps, "groupeId": groupe_id, "creneauId": creneau_id},
-    )
-
-
-def on_seance_annulee(*, creneau_id: str, groupe_id: str, ue_intitule: str, date: str) -> None:
-    _envoyer(
-        _abonnes([groupe_id]),
-        {
-            "titre": "Séance annulée",
-            "corps": f"{ue_intitule} — séance du {date} annulée.",
-            "groupeId": groupe_id,
-            "creneauId": creneau_id,
-        },
     )

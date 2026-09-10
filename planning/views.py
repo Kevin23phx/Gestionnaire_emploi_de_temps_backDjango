@@ -48,34 +48,6 @@ class CreneauDetailView(APIView):
         return Response(services.find_one(creneau_id))
 
 
-class SeanceView(APIView):
-    """[V3] FR-EDT-07 : annuler (POST) ou rétablir (DELETE) UNE séance datée.
-
-    Route distincte de /creneaux/<id>/annuler, qui reste l'annulation de
-    l'ensemble de la période (RM-10) — deux verbes différents pour deux
-    actes différents, plutôt qu'un drapeau sur la même route qu'on finirait
-    par oublier de renseigner."""
-
-    permission_classes = [require_roles("scolarite")]
-
-    def post(self, request, creneau_id: str):
-        date = request.data.get("date")
-        motif = request.data.get("motif")
-        if not date:
-            raise ValidationError("La date de la séance est obligatoire.")
-        if not motif:
-            raise ValidationError("Le motif est obligatoire.")
-        auteur = f"{request.user.prenom} {request.user.nom}"
-        return Response(services.annuler_seance(creneau_id, date, motif, auteur, request.user))
-
-    def delete(self, request, creneau_id: str):
-        date = request.query_params.get("date")
-        if not date:
-            raise ValidationError("La date de la séance est obligatoire.")
-        auteur = f"{request.user.prenom} {request.user.nom}"
-        return Response(services.retablir_seance(creneau_id, date, auteur, request.user))
-
-
 class VerifierView(APIView):
     permission_classes = [require_roles("scolarite")]
 

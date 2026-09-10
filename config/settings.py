@@ -113,10 +113,32 @@ APPEND_SLASH = False
 # distinctes : credentials (cookie cm_session) doivent être explicitement
 # autorisés, comme app.enableCors({credentials: true}) côté NestJS.
 # ---------------------------------------------------------------------------
-# Liste séparée par des virgules (ex. accès depuis un téléphone sur le même
-# réseau local, en plus de localhost) — voir ALLOWED_ORIGIN dans .env.
+# Liste séparée par des virgules — voir ALLOWED_ORIGIN dans .env. C'est la
+# seule source d'origines autorisées EN PRODUCTION.
 CORS_ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("ALLOWED_ORIGIN", "http://localhost:3000").split(",") if o.strip()]
 CORS_ALLOW_CREDENTIALS = True
+
+# EN DÉVELOPPEMENT UNIQUEMENT : accepte en plus n'importe quelle origine du
+# réseau local (10.x, 172.16-31.x, 192.168.x) sur le port du frontend.
+#
+# Motif : l'IP d'un poste sur un réseau local est attribuée par DHCP et change
+# de box en box, du campus au domicile. Une liste figée dans .env fonctionne le
+# jour où on l'écrit et casse la semaine suivante, avec pour seul symptôme des
+# 401 en cascade après une connexion pourtant réussie — un diagnostic coûteux
+# pour une cause triviale.
+#
+# Ces plages sont non routables sur Internet : une origine qui les emprunte est
+# nécessairement sur le même réseau physique que le serveur de développement.
+# Le garde-fou reste `if DEBUG` — en production, seule la liste explicite
+# ci-dessus s'applique.
+if DEBUG:
+    CORS_ALLOWED_ORIGIN_REGEXES = [
+        r"^http://localhost:\d+$",
+        r"^http://127\.0\.0\.1:\d+$",
+        r"^http://10\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+$",
+        r"^http://172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}:\d+$",
+        r"^http://192\.168\.\d{1,3}\.\d{1,3}:\d+$",
+    ]
 
 # ---------------------------------------------------------------------------
 # Session applicative (accounts.models.Session) — pas django.contrib.sessions.
@@ -144,6 +166,37 @@ REST_FRAMEWORK = {
 # favoris, abonnement agenda — et les alertes sont simplement journalisées.
 # Générer une paire : `venv/bin/vapid --gen` (py-vapid, installé avec
 # pywebpush), puis renseigner les deux variables ci-dessous.
+# ---------------------------------------------------------------------------
+# Journalisation
+# ---------------------------------------------------------------------------
+# Sans cette configuration, les messages de nos propres modules ne remontent
+# que par le "handler de dernier recours" de Python : sur stderr, sans
+# horodatage ni niveau, indistinguables du bruit du serveur de dev.
+#
+# Ça compte surtout pour un cas précis : `public.diffusion` avale
+# volontairement les erreurs d'envoi d'alerte, pour qu'un service de push
+# indisponible ne fasse jamais échouer l'enregistrement d'une annulation
+# pourtant valide. La contrepartie est qu'une alerte perdue ne se voit
+# nulle part ailleurs que dans ce journal — un Gestionnaire croirait avoir
+# prévenu les étudiants sans que rien ne le détrompe.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "campus": {"format": "[{asctime}] {levelname} {name} — {message}", "style": "{"},
+    },
+    "handlers": {
+        "console": {"class": "logging.StreamHandler", "formatter": "campus"},
+    },
+    "loggers": {
+        # Nos applications : INFO et au-dessus, horodaté et nommé.
+        "public": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        "planning": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        "referentiel": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        "accounts": {"handlers": ["console"], "level": "INFO", "propagate": False},
+    },
+}
+
 PUSH_SENDER = os.environ.get("PUSH_SENDER", "console")
 VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY", "")
 VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "")

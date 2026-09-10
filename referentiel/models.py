@@ -91,7 +91,20 @@ class Salle(models.Model):
 
 class UniteEnseignement(models.Model):
     """"niveau" (FR-REF-13, L1...M2) : à quel niveau ce cours s'adresse —
-    affiché à côté de l'intitulé, indépendant de l'année académique."""
+    affiché à côté de l'intitulé, indépendant de l'année académique.
+
+    [V3.3] "departements" : à quels départements ce cours est dispensé.
+    **Plusieurs**, et c'est le point : un cours mutualisé (« Tronc Commun
+    SEA », une UE d'anglais, une statistique de base) est enseigné à
+    plusieurs départements à la fois. Le modéliser par un simple champ
+    unique obligerait à recréer le même cours autant de fois qu'il y a de
+    départements concernés — donc à maintenir N fiches pour une seule
+    réalité, et à ne jamais pouvoir répondre à « qui suit ce cours ? ».
+
+    Relation directe vers Departement, sans table intermédiaire porteuse de
+    données : le rattachement n'a pas d'attribut propre (ni volume horaire,
+    ni coefficient) tant que personne ne l'a demandé.
+    """
 
     id = models.CharField(primary_key=True, max_length=64, default=generate_id, editable=False)
     code = models.CharField(max_length=64, null=True, blank=True)
@@ -99,6 +112,7 @@ class UniteEnseignement(models.Model):
     niveau = models.CharField(max_length=32)
 
     ufr = models.ForeignKey(Ufr, related_name="ues", on_delete=models.PROTECT)
+    departements = models.ManyToManyField("referentiel.Departement", related_name="cours", blank=True)
 
     class Meta:
         db_table = "unite_enseignement"

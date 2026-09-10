@@ -46,26 +46,6 @@ class UfrListCreateView(APIView):
         return Response({"ufr": UfrSerializer(ufr).data}, status=201)
 
 
-class PeriodeAcademiqueView(APIView):
-    """[V3] FR-REF-16 : le Gestionnaire définit la période de SA propre UFR.
-
-    Le `ufr_id` n'est jamais lu dans la requête : il vient de la session
-    (INT-07). Un Gestionnaire ne peut donc pas, même en forgeant l'appel,
-    déplacer la rentrée d'une UFR voisine.
-    """
-
-    permission_classes = [require_roles("scolarite")]
-
-    def put(self, request):
-        debut = request.data.get("debut")
-        fin = request.data.get("fin")
-        if not debut or not fin:
-            raise ValidationError("Les dates de début et de fin sont obligatoires.")
-        auteur = f"{request.user.prenom} {request.user.nom}"
-        ufr = services.definir_periode(request.user.ufr_id, request.data.get("libelle"), debut, fin, auteur)
-        return Response({"ufr": UfrSerializer(ufr).data})
-
-
 class GestionnaireCreateView(APIView):
     permission_classes = [require_roles("admin")]
 

@@ -2,7 +2,7 @@ from django.test import Client, TestCase
 
 from accounts.models import Role
 from planning.models import Creneau
-from tests.base import creer_compte, creer_enseignant, creer_groupe, creer_salle, creer_ue, login, post_json
+from tests.base import jour, creer_compte, creer_enseignant, creer_groupe, creer_salle, creer_ue, login, post_json
 
 
 class PlanningConflictsTests(TestCase):
@@ -19,11 +19,17 @@ class PlanningConflictsTests(TestCase):
         self.client_sco = Client()
         login(self.client_sco, "scolarite.test")
 
-    def _creneau(self, ue, ens, groupe, salle, jour, hd, hf, **extra):
-        return {"ueId": ue.id, "enseignantId": ens.id, "groupeId": groupe.id, "salleId": salle.id, "jour": jour, "heureDebut": hd, "heureFin": hf, **extra}
+    def _creneau(self, ue, ens, groupe, salle, nom_jour, hd, hf, **extra):
+        """[V4] Le payload porte une DATE réelle, plus un jour de semaine.
+        Le test continue de raisonner en « lundi », « mardi » — c'est plus
+        lisible — mais la conversion se fait ici, une fois."""
+        return {
+            "ueId": ue.id, "enseignantId": ens.id, "groupeId": groupe.id, "salleId": salle.id,
+            "date": jour(nom_jour).isoformat(), "heureDebut": hd, "heureFin": hf, **extra,
+        }
 
     def test_conflit_de_salle_409_sans_derogation_201_avec(self):
-        existant = Creneau.objects.create(ue=self.ue1, enseignant=self.ens1, groupe=self.groupe1, salle=self.salle, jour="lundi", heure_debut_minutes=8 * 60, heure_fin_minutes=10 * 60)
+        existant = Creneau.objects.create(ue=self.ue1, enseignant=self.ens1, groupe=self.groupe1, salle=self.salle, date=jour("lundi"), heure_debut_minutes=8 * 60, heure_fin_minutes=10 * 60)
 
         candidat = self._creneau(self.ue2, self.ens2, self.groupe2, self.salle, "lundi", "09:00", "09:30")
         rejet = post_json(self.client_sco, "/api/creneaux", {"creneaux": [candidat]})
@@ -37,14 +43,14 @@ class PlanningConflictsTests(TestCase):
         self.assertEqual(Creneau.objects.get(id=creneau_id).derogation_motif, "Autorisé")
 
     def test_conflit_enseignant_meme_enseignant_deux_creneaux_simultanes(self):
-        Creneau.objects.create(ue=self.ue1, enseignant=self.ens1, groupe=self.groupe1, salle=self.salle, jour="mardi", heure_debut_minutes=9 * 60, heure_fin_minutes=10 * 60)
+        Creneau.objects.create(ue=self.ue1, enseignant=self.ens1, groupe=self.groupe1, salle=self.salle, date=jour("mardi"), heure_debut_minutes=9 * 60, heure_fin_minutes=10 * 60)
         candidat = self._creneau(self.ue2, self.ens1, self.groupe2, self.autre_salle, "mardi", "09:00", "09:45")
         res = post_json(self.client_sco, "/api/creneaux", {"creneaux": [candidat]})
         self.assertEqual(res.status_code, 409)
         self.assertTrue(any(c["type"] == "enseignant" for c in res.json()["conflits"]))
 
     def test_conflit_groupe_meme_groupe_deux_cours_simultanes(self):
-        Creneau.objects.create(ue=self.ue1, enseignant=self.ens1, groupe=self.groupe1, salle=self.salle, jour="mercredi", heure_debut_minutes=9 * 60, heure_fin_minutes=10 * 60)
+        Creneau.objects.create(ue=self.ue1, enseignant=self.ens1, groupe=self.groupe1, salle=self.salle, date=jour("mercredi"), heure_debut_minutes=9 * 60, heure_fin_minutes=10 * 60)
         candidat = self._creneau(self.ue2, self.ens2, self.groupe1, self.autre_salle, "mercredi", "09:00", "09:45")
         res = post_json(self.client_sco, "/api/creneaux", {"creneaux": [candidat]})
         self.assertEqual(res.status_code, 409)
@@ -70,7 +76,7 @@ class PlanningConflictsTests(TestCase):
         self.assertEqual(avec_derogation.status_code, 201)
 
     def test_atomicite_du_batch_un_item_en_conflit_fait_echouer_tout_le_lot(self):
-        Creneau.objects.create(ue=self.ue1, enseignant=self.ens1, groupe=self.groupe1, salle=self.salle, jour="samedi", heure_debut_minutes=8 * 60, heure_fin_minutes=10 * 60)
+        Creneau.objects.create(ue=self.ue1, enseignant=self.ens1, groupe=self.groupe1, salle=self.salle, date=jour("samedi"), heure_debut_minutes=8 * 60, heure_fin_minutes=10 * 60)
         compte_avant = Creneau.objects.count()
 
         valide = self._creneau(self.ue2, self.ens2, self.groupe2, self.autre_salle, "samedi", "08:00", "08:45")

@@ -38,49 +38,12 @@ class Ufr(models.Model):
     type = models.CharField(max_length=20, choices=TypeEtablissement.choices, default=TypeEtablissement.UFR)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    # [V3] FR-REF-16/17 : période académique EN COURS de cette UFR. Portée
-    # par l'UFR et non globalement, parce que les UFR de l'UJKZ ne rentrent
-    # pas toutes le même jour (FR-REF-17). Deux consommateurs, et deux
-    # seulement : la borne de fin de récurrence du flux calendrier
-    # (sans quoi un cours se répéterait indéfiniment dans l'agenda du
-    # visiteur), et la validation des dates d'annulation de séance
-    # (INT-11 : on n'annule pas une séance jamais programmée).
-    #
-    # Volontairement des champs sur l'UFR plutôt qu'un modèle "Semestre"
-    # historisé : FR-REF-16 ne demande que la période *en cours*, et rien
-    # dans le système ne consulte une période passée. Le jour où l'archivage
-    # inter-semestres deviendra un besoin réel, ce sera une extraction de
-    # modèle, pas une réécriture.
-    periode_libelle = models.CharField(max_length=64, null=True, blank=True)
-    periode_debut = models.DateField(null=True, blank=True)
-    periode_fin = models.DateField(null=True, blank=True)
-
     class Meta:
         db_table = "ufr"
         ordering = ["nom"]
-        constraints = [
-            # Une période à moitié saisie ne veut rien dire : soit les deux
-            # bornes, soit aucune. Et une fin avant le début produirait un
-            # calendrier vide sans le moindre message d'erreur.
-            models.CheckConstraint(
-                condition=(
-                    (models.Q(periode_debut__isnull=True) & models.Q(periode_fin__isnull=True))
-                    | (
-                        models.Q(periode_debut__isnull=False)
-                        & models.Q(periode_fin__isnull=False)
-                        & models.Q(periode_fin__gt=models.F("periode_debut"))
-                    )
-                ),
-                name="ufr_periode_academique_coherente",
-            ),
-        ]
 
     def __str__(self) -> str:
         return self.nom
-
-    @property
-    def periode_definie(self) -> bool:
-        return self.periode_debut is not None and self.periode_fin is not None
 
     @property
     def sigle_affiche(self) -> str:

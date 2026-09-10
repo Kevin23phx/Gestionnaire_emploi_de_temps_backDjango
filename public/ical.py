@@ -11,11 +11,18 @@ n'est cosmétique :
    ignorer purement et simplement la mise à jour. L'abonnement semblerait
    fonctionner tout en ne transmettant jamais la seule information qui
    compte — l'annulation.
-2. Une séance annulée est **réécrite**, jamais retirée (INV-15). Le réflexe
-   serait un `EXDATE`, qui la ferait proprement disparaître de l'agenda :
-   c'est exactement ce qu'il ne faut pas, car l'étudiant se déplacerait
-   quand même, sans rien avoir remarqué. On émet à la place une occurrence
-   de remplacement (`RECURRENCE-ID`) intitulée « ANNULÉ ».
+2. Une séance annulée est **conservée**, jamais retirée (INV-15). Le réflexe
+   serait de ne plus l'émettre du tout, ce qui la ferait proprement
+   disparaître de l'agenda : c'est exactement ce qu'il ne faut pas, car
+   l'étudiant se déplacerait quand même, sans rien avoir remarqué. Elle
+   reste donc présente, intitulée « ANNULÉ ».
+
+[V4] Plus aucune récurrence. Le programme de l'UJKZ est publié semaine par
+semaine et change d'une semaine à l'autre : chaque séance est un événement
+daté, autonome. La `RRULE` a disparu — avec elle, les cours répétés pendant
+les vacances et les bornes de semestre impossibles à tenir à jour. Un
+abonné reçoit simplement les nouveaux événements à mesure que les semaines
+sont publiées, sans jamais avoir à se réabonner (l'adresse ne change pas).
 3. Une alarme (`VALARM`) sur les séances annulées et modifiées. C'est elle
    qui transforme l'agenda d'un affichage passif en une alerte : le
    téléphone sonne à l'heure où l'étudiant serait parti.
@@ -31,7 +38,7 @@ import datetime
 
 from core.time_utils import minutes_to_hhmm  # noqa: F401  (lisibilité des logs de debug)
 from planning.models import Creneau
-from public.services import JOURS_INDEX, get_groupe_public
+from public.services import get_groupe_public
 
 PRODID = "-//UJKZ//Campus Manager//FR"
 TZID = "Africa/Ouagadougou"
@@ -52,8 +59,6 @@ VTIMEZONE = [
     "END:STANDARD",
     "END:VTIMEZONE",
 ]
-
-DUREE_FANTOME = datetime.timedelta(days=7)
 
 
 def _echapper(texte: str | None) -> str:
@@ -92,15 +97,13 @@ def _plier(ligne: str) -> list[str]:
     return [morceaux[0]] + [" " + m for m in morceaux[1:]]
 
 
+def _maintenant() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
 def _horodatage(date: datetime.date, minutes: int) -> str:
     heure, minute = divmod(minutes, 60)
     return f"{date.strftime('%Y%m%d')}T{heure:02d}{minute:02d}00"
-
-
-def _premiere_occurrence(jour: str, debut_periode: datetime.date) -> datetime.date:
-    """Première date, à partir du début de la période, tombant le bon jour."""
-    ecart = (JOURS_INDEX[jour] - debut_periode.weekday()) % 7
-    return debut_periode + datetime.timedelta(days=ecart)
 
 
 def _alarme(description: str) -> list[str]:
@@ -115,15 +118,12 @@ def _alarme(description: str) -> list[str]:
     ]
 
 
-def _evenement_normal(creneau: Creneau, debut: datetime.date, fin: datetime.date) -> list[str]:
-    premiere = _premiere_occurrence(creneau.jour, debut)
-    if premiere > fin:
-        return []
-
-    annule_partout = creneau.statut == "annule"
+def _evenement(creneau: Creneau) -> list[str]:
+    """Une séance datée = un événement autonome. Ni RRULE, ni RECURRENCE-ID."""
+    annule = creneau.statut == "annule"
     modifie = creneau.statut == "modifie"
 
-    if annule_partout:
+    if annule:
         titre = f"ANNULÉ — {creneau.ue.intitule}"
     elif modifie:
         titre = f"MODIFIÉ — {creneau.ue.intitule}"
@@ -139,85 +139,49 @@ def _evenement_normal(creneau: Creneau, debut: datetime.date, fin: datetime.date
         "BEGIN:VEVENT",
         f"UID:{creneau.id}@campus-manager.ujkz",
         f"SEQUENCE:{creneau.version}",
-        f"DTSTAMP:{datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}",
-        f"DTSTART;TZID={TZID}:{_horodatage(premiere, creneau.heure_debut_minutes)}",
-        f"DTEND;TZID={TZID}:{_horodatage(premiere, creneau.heure_fin_minutes)}",
-        f"RRULE:FREQ=WEEKLY;UNTIL={_horodatage(fin, 23 * 60 + 59)}",
+        f"DTSTAMP:{_maintenant()}",
+        f"DTSTART;TZID={TZID}:{_horodatage(creneau.date, creneau.heure_debut_minutes)}",
+        f"DTEND;TZID={TZID}:{_horodatage(creneau.date, creneau.heure_fin_minutes)}",
         f"SUMMARY:{_echapper(titre)}",
         f"LOCATION:{_echapper(f'{creneau.salle.nom} — {creneau.salle.batiment}')}",
         f"DESCRIPTION:{_echapper(chr(10).join(description))}",
-        f"STATUS:{'CANCELLED' if annule_partout else 'CONFIRMED'}",
+        # Volontairement CONFIRMED même pour une séance annulée : un
+        # événement marqué CANCELLED est masqué par la plupart des agendas,
+        # ce qui reviendrait à effacer l'information (INV-15). L'annulation
+        # est dite dans le titre, là où l'étudiant la lira.
+        "STATUS:CONFIRMED",
     ]
-    if annule_partout or modifie:
+    if annule:
+        lignes.append("TRANSP:TRANSPARENT")
+    if annule or modifie:
         lignes += _alarme(titre)
     lignes.append("END:VEVENT")
     return lignes
 
 
-def _occurrences_annulees(creneau: Creneau, debut: datetime.date, fin: datetime.date) -> list[str]:
-    """Une occurrence de remplacement par séance annulée (FR-PUB-07).
-
-    `RECURRENCE-ID` désigne l'occurrence d'origine à remplacer : l'agenda
-    remplace CETTE date-là et laisse les autres intactes — la traduction
-    exacte, côté calendrier, de l'invariant INV-14.
-    """
-    lignes: list[str] = []
-    for seance in creneau.seances_annulees.all():
-        if not (debut <= seance.date <= fin):
-            continue
-        lignes += [
-            "BEGIN:VEVENT",
-            f"UID:{creneau.id}@campus-manager.ujkz",
-            f"RECURRENCE-ID;TZID={TZID}:{_horodatage(seance.date, creneau.heure_debut_minutes)}",
-            f"SEQUENCE:{creneau.version}",
-            f"DTSTAMP:{datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}",
-            f"DTSTART;TZID={TZID}:{_horodatage(seance.date, creneau.heure_debut_minutes)}",
-            f"DTEND;TZID={TZID}:{_horodatage(seance.date, creneau.heure_fin_minutes)}",
-            f"SUMMARY:{_echapper(f'ANNULÉ — {creneau.ue.intitule}')}",
-            f"LOCATION:{_echapper(f'{creneau.salle.nom} — {creneau.salle.batiment}')}",
-            f"DESCRIPTION:{_echapper(f'Séance annulée. Motif : {seance.motif}')}",
-            # Volontairement CONFIRMED et non CANCELLED : un événement
-            # marqué CANCELLED est masqué par la plupart des agendas, ce qui
-            # reviendrait à effacer l'information (INV-15). L'annulation est
-            # dite dans le titre, là où l'étudiant la lira.
-            "STATUS:CONFIRMED",
-            "TRANSP:TRANSPARENT",
-        ]
-        lignes += _alarme(f"Cours annulé : {creneau.ue.intitule}")
-        lignes.append("END:VEVENT")
-    return lignes
-
-
 def _fantome_deplacement(creneau: Creneau, aujourdhui: datetime.date) -> list[str]:
-    """L'événement laissé à l'ANCIEN horaire d'un cours déplacé (FR-PUB-07).
+    """L'événement laissé à l'ANCIENNE case d'un cours déplacé (FR-PUB-07).
 
     Sans lui, un déplacement est le changement le plus dangereux du système :
     l'événement bouge dans l'agenda, personne ne remarque rien, et l'étudiant
-    se présente à l'ancienne heure devant une salle vide. Le fantôme vit une
-    semaine — au-delà, l'habitude est prise et il devient du bruit.
+    se présente à l'ancienne heure devant une salle vide.
     """
-    if not creneau.deplace_le or creneau.ancien_jour is None:
+    if not creneau.deplace_le or creneau.ancienne_date is None:
+        return []
+    # Passé l'ancienne date, le fantôme n'avertit plus personne.
+    if creneau.ancienne_date < aujourdhui:
         return []
 
-    depuis = creneau.deplace_le.date()
-    if aujourdhui - depuis > DUREE_FANTOME:
-        return []
-
-    ecart = (JOURS_INDEX[creneau.ancien_jour] - depuis.weekday()) % 7
-    date_fantome = depuis + datetime.timedelta(days=ecart)
-    if date_fantome - depuis > DUREE_FANTOME:
-        return []
-
-    nouveau = f"{creneau.jour} {minutes_to_hhmm(creneau.heure_debut_minutes)}"
+    nouveau = f"{creneau.jour} {creneau.date.isoformat()} à {minutes_to_hhmm(creneau.heure_debut_minutes)}"
     return [
         "BEGIN:VEVENT",
-        # UID distinct : c'est un autre événement, pas une révision de
-        # celui qui a bougé — les confondre ferait s'annuler l'un l'autre.
+        # UID distinct : c'est un autre événement, pas une révision de celui
+        # qui a bougé — les confondre les ferait s'annuler l'un l'autre.
         f"UID:{creneau.id}-deplace@campus-manager.ujkz",
         f"SEQUENCE:{creneau.version}",
-        f"DTSTAMP:{datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}",
-        f"DTSTART;TZID={TZID}:{_horodatage(date_fantome, creneau.ancien_heure_debut_minutes)}",
-        f"DTEND;TZID={TZID}:{_horodatage(date_fantome, creneau.ancien_heure_fin_minutes)}",
+        f"DTSTAMP:{_maintenant()}",
+        f"DTSTART;TZID={TZID}:{_horodatage(creneau.ancienne_date, creneau.ancien_heure_debut_minutes)}",
+        f"DTEND;TZID={TZID}:{_horodatage(creneau.ancienne_date, creneau.ancien_heure_fin_minutes)}",
         f"SUMMARY:{_echapper(f'DÉPLACÉ — {creneau.ue.intitule}')}",
         f"LOCATION:{_echapper(f'{creneau.salle.nom} — {creneau.salle.batiment}')}",
         f"DESCRIPTION:{_echapper(f'Ce cours a été déplacé au {nouveau}, salle {creneau.salle.nom}.')}",
@@ -230,19 +194,19 @@ def calendrier_du_groupe(groupe_id: str) -> str:
     groupe = get_groupe_public(groupe_id)
     ufr = groupe.ufr
 
-    # Sans période académique déclarée (FR-REF-16), on ne peut pas borner la
-    # récurrence : un cours se répéterait indéfiniment dans l'agenda du
-    # visiteur, pour toujours. On prend alors une fenêtre glissante d'un an,
-    # ce qui est faux mais fini — et le Gestionnaire est invité à renseigner
-    # sa période dans l'interface.
+    # [V4] Toutes les séances publiées, à partir d'un mois en arrière.
+    # Rien à borner en avant : le programme n'existe que pour les semaines
+    # réellement publiées, il ne se projette pas dans le vide. La fenêtre
+    # arrière garde l'historique récent visible dans l'agenda — un étudiant
+    # qui consulte le lundi doit encore voir la semaine qui s'achève — sans
+    # faire grossir le flux indéfiniment au fil des mois.
     aujourdhui = datetime.date.today()
-    debut = ufr.periode_debut or aujourdhui - datetime.timedelta(days=30)
-    fin = ufr.periode_fin or aujourdhui + datetime.timedelta(days=365)
+    debut = aujourdhui - datetime.timedelta(days=30)
 
     creneaux = (
-        Creneau.objects.filter(groupe_id=groupe_id)
+        Creneau.objects.filter(groupe_id=groupe_id, date__gte=debut)
         .select_related("ue", "enseignant", "salle", "groupe")
-        .prefetch_related("seances_annulees")
+        .order_by("date", "heure_debut_minutes")
     )
 
     lignes = [
@@ -263,8 +227,7 @@ def calendrier_du_groupe(groupe_id: str) -> str:
     ]
 
     for creneau in creneaux:
-        lignes += _evenement_normal(creneau, debut, fin)
-        lignes += _occurrences_annulees(creneau, debut, fin)
+        lignes += _evenement(creneau)
         lignes += _fantome_deplacement(creneau, aujourdhui)
 
     lignes.append("END:VCALENDAR")
