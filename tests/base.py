@@ -64,14 +64,14 @@ def creer_salle(nom: str, capacite: int = 50, type_usage: str = "propre", ufr_id
 
 
 def creer_groupe(
-    nom: str, filiere: str = "Informatique", niveau: str = "L3", ufr_id: str | None = None,
+    nom: str, departement: str = "Informatique", niveau: str = "L3", ufr_id: str | None = None,
     annee_academique: str = "2025-2026", effectif: int = 0,
 ) -> Groupe:
     """[V3.1] "effectif" est une valeur saisie, plus un COUNT(Etudiant) : les
     tests de conflit de capacité la posent directement au lieu de créer des
     étudiants un par un."""
     return Groupe.objects.create(
-        nom=nom, filiere=filiere, niveau=niveau, annee_academique=annee_academique,
+        nom=nom, departement=departement, niveau=niveau, annee_academique=annee_academique,
         effectif=effectif, ufr_id=ufr_id or ufr_par_defaut(),
     )
 

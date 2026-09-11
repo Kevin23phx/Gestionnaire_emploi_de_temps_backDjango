@@ -57,13 +57,13 @@ class GroupesView(APIView):
         return Response({"groupes": GroupeSerializer(groupes, many=True).data})
 
     def post(self, request):
-        _requis(request.data, "nom", "filiere", "niveau", "anneeAcademique")
+        _requis(request.data, "nom", "departement", "niveau", "anneeAcademique")
         # "effectif" n'est pas dans _requis : 0 est une valeur légitime (un
         # groupe créé avant la rentrée), et `_requis` rejette tout ce qui est
         # falsy — il refuserait donc précisément ce cas.
         groupe = groupes_service.create_groupe(
             request.data["nom"],
-            request.data["filiere"],
+            request.data["departement"],
             request.data["niveau"],
             request.data["anneeAcademique"],
             request.data.get("effectif", 0),

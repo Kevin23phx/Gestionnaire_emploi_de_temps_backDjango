@@ -33,21 +33,21 @@ class UfrsView(APIView):
         return Response({"ufrs": services.list_ufrs()})
 
 
-class FilieresView(APIView):
+class DepartementsView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
         _requis(request.query_params, "ufrId")
-        return Response({"filieres": services.list_filieres(request.query_params["ufrId"])})
+        return Response({"departements": services.list_departements(request.query_params["ufrId"])})
 
 
 class NiveauxView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
-        _requis(request.query_params, "ufrId", "filiere")
+        _requis(request.query_params, "ufrId", "departement")
         return Response(
-            {"niveaux": services.list_niveaux(request.query_params["ufrId"], request.query_params["filiere"])}
+            {"niveaux": services.list_niveaux(request.query_params["ufrId"], request.query_params["departement"])}
         )
 
 
@@ -55,12 +55,12 @@ class GroupesView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
-        _requis(request.query_params, "ufrId", "filiere", "niveau")
+        _requis(request.query_params, "ufrId", "departement", "niveau")
         return Response(
             {
                 "groupes": services.list_groupes(
                     request.query_params["ufrId"],
-                    request.query_params["filiere"],
+                    request.query_params["departement"],
                     request.query_params["niveau"],
                 )
             }

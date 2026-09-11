@@ -37,7 +37,13 @@ class Groupe(models.Model):
 
     id = models.CharField(primary_key=True, max_length=64, default=generate_id, editable=False)
     nom = models.CharField(max_length=255)
-    filiere = models.CharField(max_length=255)
+    # [V5] Nommé "departement" — c'était "filiere" jusqu'ici, et le double
+    # vocabulaire avec le modèle `Departement` (le référentiel officiel dont
+    # cette valeur est censée reprendre un `libelle`) semait la confusion.
+    # Reste une chaîne dénormalisée et non une FK, délibérément : un groupe
+    # garde le libellé de son département au moment de sa création, même si
+    # celui-ci est renommé ou fermé ensuite (cf. Departement, plus haut).
+    departement = models.CharField(max_length=255)
     niveau = models.CharField(max_length=32)
     annee_academique = models.CharField(max_length=16)
     effectif = models.PositiveIntegerField(default=0)
@@ -135,7 +141,7 @@ class Departement(models.Model):
     donner qu'un référentiel de qualité décroissante, chaque faute de frappe
     devenant une filière de plus dans la recherche publique (FR-PUB-02).
 
-    Reste une chaîne dénormalisée sur `Groupe.filiere` plutôt qu'une clé
+    Reste une chaîne dénormalisée sur `Groupe.departement` plutôt qu'une clé
     étrangère, délibérément : un groupe garde le libellé de sa filière au
     moment de sa création, même si le département est renommé ou fermé
     ensuite. Un emploi du temps de l'an dernier ne doit pas changer de nom

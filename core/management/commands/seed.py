@@ -125,8 +125,8 @@ class Command(BaseCommand):
 
         # [V3.1] L'effectif est saisi, plus compté : il n'existe plus de
         # référentiel nominatif d'étudiants (voir referentiel/models.py).
-        groupe_a = Groupe.objects.create(nom="L3 INFO - Groupe A", filiere="Informatique", niveau="L3", annee_academique="2025-2026", effectif=8, ufr_id=ufr_pilote)
-        groupe_td1 = Groupe.objects.create(nom="L2 INFO - TD 1", filiere="Informatique", niveau="L2", annee_academique="2025-2026", effectif=6, ufr_id=ufr_pilote)
+        groupe_a = Groupe.objects.create(nom="L3 INFO - Groupe A", departement="Informatique", niveau="L3", annee_academique="2025-2026", effectif=8, ufr_id=ufr_pilote)
+        groupe_td1 = Groupe.objects.create(nom="L2 INFO - TD 1", departement="Informatique", niveau="L2", annee_academique="2025-2026", effectif=6, ufr_id=ufr_pilote)
 
         # [V3.3] La filière d'un groupe DOIT être un département officiel de
         # son établissement. Le seed en avait quatre qui n'en étaient pas
@@ -140,8 +140,8 @@ class Command(BaseCommand):
         ue_bio_cell = UniteEnseignement.objects.create(code="SVT101", intitule="Biologie Cellulaire", niveau="L1", ufr_id="ufr-svt")
         ue_geo_dyn = UniteEnseignement.objects.create(code="SVT102", intitule="Géodynamique Interne", niveau="L2", ufr_id="ufr-svt")
         amphi_svt = Salle.objects.create(nom="Amphi SVT 1", batiment="UFR/SVT", capacite=120, type_usage="propre", ufr_id="ufr-svt")
-        groupe_svt_l1 = Groupe.objects.create(nom="L1 SVT - Groupe A", filiere="Biochimie et microbiologie", niveau="L1", annee_academique="2025-2026", effectif=95, ufr_id="ufr-svt")
-        groupe_svt_l2 = Groupe.objects.create(nom="L2 Géologie", filiere="Sciences de la Terre", niveau="L2", annee_academique="2024-2025", effectif=42, ufr_id="ufr-svt")
+        groupe_svt_l1 = Groupe.objects.create(nom="L1 SVT - Groupe A", departement="Biochimie et microbiologie", niveau="L1", annee_academique="2025-2026", effectif=95, ufr_id="ufr-svt")
+        groupe_svt_l2 = Groupe.objects.create(nom="L2 Géologie", departement="Sciences de la Terre", niveau="L2", annee_academique="2024-2025", effectif=42, ufr_id="ufr-svt")
         # FR-REF-06 : Kaboré Ismaël (déjà enseignant à l'UFR-SEA) intervient
         # AUSSI à l'UFR-SVT — même fiche Enseignant, une affectation de plus.
         EnseignantUfr.objects.create(enseignant=kabore, ufr_id="ufr-svt")
@@ -153,7 +153,7 @@ class Command(BaseCommand):
         # --- UFR-SH ---
         ue_socio_gen = UniteEnseignement.objects.create(code="SH101", intitule="Sociologie Générale", niveau="L2", ufr_id="ufr-sh")
         salle_sh = Salle.objects.create(nom="Salle 201", batiment="UFR/SH", capacite=60, type_usage="propre", ufr_id="ufr-sh")
-        groupe_sh_l2 = Groupe.objects.create(nom="L2 Sociologie", filiere="Sociologie", niveau="L2", annee_academique="2024-2025", effectif=58, ufr_id="ufr-sh")
+        groupe_sh_l2 = Groupe.objects.create(nom="L2 Sociologie", departement="Sociologie", niveau="L2", annee_academique="2024-2025", effectif=58, ufr_id="ufr-sh")
         ens_sh = Enseignant.objects.create(nom="Compaoré", prenom="Elie")
         EnseignantUfr.objects.create(enseignant=ens_sh, ufr_id="ufr-sh")
         Creneau.objects.create(ue=ue_socio_gen, enseignant=ens_sh, groupe=groupe_sh_l2, salle=salle_sh, date=jour("mercredi"), heure_debut_minutes=8 * 60, heure_fin_minutes=10 * 60, statut="normal")
@@ -161,7 +161,7 @@ class Command(BaseCommand):
         # --- UFR-SDS ---
         ue_anat = UniteEnseignement.objects.create(code="SDS101", intitule="Anatomie Générale", niveau="L1", ufr_id="ufr-sds")
         salle_sds = Salle.objects.create(nom="Amphi Santé", batiment="UFR/SDS", capacite=150, type_usage="propre", ufr_id="ufr-sds")
-        groupe_sds_l1 = Groupe.objects.create(nom="L1 Médecine - Groupe A", filiere="Medecine", niveau="L1", annee_academique="2025-2026", effectif=140, ufr_id="ufr-sds")
+        groupe_sds_l1 = Groupe.objects.create(nom="L1 Médecine - Groupe A", departement="Medecine", niveau="L1", annee_academique="2025-2026", effectif=140, ufr_id="ufr-sds")
         ens_sds = Enseignant.objects.create(nom="Ilboudo", prenom="Salimata")
         EnseignantUfr.objects.create(enseignant=ens_sds, ufr_id="ufr-sds")
         Creneau.objects.create(ue=ue_anat, enseignant=ens_sds, groupe=groupe_sds_l1, salle=salle_sds, date=jour("jeudi"), heure_debut_minutes=8 * 60, heure_fin_minutes=10 * 60, statut="normal")
@@ -169,7 +169,7 @@ class Command(BaseCommand):
         # --- UFR-LAC ---
         ue_lingu = UniteEnseignement.objects.create(code="LAC101", intitule="Linguistique Générale", niveau="L3", ufr_id="ufr-lac")
         salle_lac = Salle.objects.create(nom="Salle 105", batiment="UFR/LAC", capacite=50, type_usage="propre", ufr_id="ufr-lac")
-        groupe_lac_l3 = Groupe.objects.create(nom="L3 Lettres Modernes", filiere="Lettres Modernes (LM)", niveau="L3", annee_academique="2023-2024", effectif=35, ufr_id="ufr-lac")
+        groupe_lac_l3 = Groupe.objects.create(nom="L3 Lettres Modernes", departement="Lettres Modernes (LM)", niveau="L3", annee_academique="2023-2024", effectif=35, ufr_id="ufr-lac")
         ens_lac = Enseignant.objects.create(nom="Ouédraogo", prenom="Fatimata")
         EnseignantUfr.objects.create(enseignant=ens_lac, ufr_id="ufr-lac")
         Creneau.objects.create(ue=ue_lingu, enseignant=ens_lac, groupe=groupe_lac_l3, salle=salle_lac, date=jour("vendredi"), heure_debut_minutes=8 * 60, heure_fin_minutes=10 * 60, statut="normal")
@@ -204,7 +204,7 @@ class Command(BaseCommand):
             )
             groupe = Groupe.objects.create(
                 nom=f"{niveau} {departement} - Groupe A",
-                filiere=departement,
+                departement=departement,
                 niveau=niveau,
                 annee_academique="2025-2026",
                 effectif=60,

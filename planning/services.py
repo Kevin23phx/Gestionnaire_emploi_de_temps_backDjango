@@ -41,7 +41,7 @@ def _denormaliser(creneau: Creneau, effectif: int) -> dict:
         "groupe": {
             "id": creneau.groupe.id,
             "nom": creneau.groupe.nom,
-            "filiere": creneau.groupe.filiere,
+            "departement": creneau.groupe.departement,
             "niveau": creneau.groupe.niveau,
             "anneeAcademique": creneau.groupe.annee_academique,
             "ufrId": creneau.groupe.ufr_id,

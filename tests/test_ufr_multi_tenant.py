@@ -66,7 +66,7 @@ class UfrMultiTenantTests(TestCase):
         self.assertIn(self.groupe_b.id, ids)
 
     def test_creation_rattache_toujours_a_sa_propre_ufr(self):
-        res_groupe = post_json(self.client_a, "/api/groupes", {"nom": "Nouveau Groupe A", "filiere": "Informatique", "niveau": "L1", "anneeAcademique": "2025-2026"})
+        res_groupe = post_json(self.client_a, "/api/groupes", {"nom": "Nouveau Groupe A", "departement": "Informatique", "niveau": "L1", "anneeAcademique": "2025-2026"})
         self.assertEqual(res_groupe.json()["groupe"]["ufrId"], "ufr-a")
 
         res_salle = post_json(self.client_a, "/api/salles", {"nom": "Salle Test A", "batiment": "Bât. A", "capacite": 30, "typeUsage": "propre"})

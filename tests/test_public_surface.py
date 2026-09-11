@@ -29,8 +29,8 @@ class SurfacePubliqueTests(TestCase):
         creer_ufr("ufr-vide", "UFR Sans Groupe", "vide")
         self.ue = creer_ue("Réseaux Informatiques", code="INFO303")
         self.salle = creer_salle("Amphi A", 1000)
-        self.groupe = creer_groupe("L3 INFO - Groupe A", filiere="Informatique", niveau="L3", effectif=40)
-        self.autre = creer_groupe("L2 INFO - Groupe B", filiere="Informatique", niveau="L2")
+        self.groupe = creer_groupe("L3 INFO - Groupe A", departement="Informatique", niveau="L3", effectif=40)
+        self.autre = creer_groupe("L2 INFO - Groupe B", departement="Informatique", niveau="L2")
         self.enseignant = creer_enseignant("Kaboré", "Ismaël")
 
         self.creneau = Creneau.objects.create(
@@ -55,25 +55,25 @@ class SurfacePubliqueTests(TestCase):
 
     def test_la_cascade_se_resserre_a_chaque_etage(self):
         ufr = ufr_par_defaut()
-        filieres = self.anonyme.get(f"/api/public/filieres?ufrId={ufr}").json()["filieres"]
-        self.assertEqual(filieres, ["Informatique"])
+        departements = self.anonyme.get(f"/api/public/departements?ufrId={ufr}").json()["departements"]
+        self.assertEqual(departements, ["Informatique"])
 
-        niveaux = self.anonyme.get(f"/api/public/niveaux?ufrId={ufr}&filiere=Informatique").json()["niveaux"]
+        niveaux = self.anonyme.get(f"/api/public/niveaux?ufrId={ufr}&departement=Informatique").json()["niveaux"]
         self.assertEqual(niveaux, ["L2", "L3"])
 
         groupes = self.anonyme.get(
-            f"/api/public/groupes?ufrId={ufr}&filiere=Informatique&niveau=L3"
+            f"/api/public/groupes?ufrId={ufr}&departement=Informatique&niveau=L3"
         ).json()["groupes"]
         self.assertEqual([g["id"] for g in groupes], [self.groupe.id])
 
     def test_ufr_plus_niveau_ne_suffisent_pas_a_designer_un_programme(self):
-        """RM-09 : justification de la cascade à 4 étages. Deux filières au
-        même niveau donnent deux programmes distincts — c'est la raison pour
-        laquelle « UFR + niveau », proposé au départ, a été écarté."""
-        creer_groupe("L3 MATHS - Groupe A", filiere="Mathématiques", niveau="L3")
+        """RM-09 : justification de la cascade à 4 étages. Deux départements
+        au même niveau donnent deux programmes distincts — c'est la raison
+        pour laquelle « UFR + niveau », proposé au départ, a été écarté."""
+        creer_groupe("L3 MATHS - Groupe A", departement="Mathématiques", niveau="L3")
         ufr = ufr_par_defaut()
-        info = self.anonyme.get(f"/api/public/groupes?ufrId={ufr}&filiere=Informatique&niveau=L3").json()
-        maths = self.anonyme.get(f"/api/public/groupes?ufrId={ufr}&filiere=Mathématiques&niveau=L3").json()
+        info = self.anonyme.get(f"/api/public/groupes?ufrId={ufr}&departement=Informatique&niveau=L3").json()
+        maths = self.anonyme.get(f"/api/public/groupes?ufrId={ufr}&departement=Mathématiques&niveau=L3").json()
         self.assertEqual(len(info["groupes"]), 1)
         self.assertEqual(len(maths["groupes"]), 1)
         self.assertNotEqual(info["groupes"][0]["id"], maths["groupes"][0]["id"])
@@ -153,7 +153,7 @@ class SurfacePubliqueTests(TestCase):
         self.assertEqual(vide.json()["seances"], [])
 
         inexistant = self.anonyme.get(
-            f"/api/public/groupes?ufrId={ufr_par_defaut()}&filiere=Inexistante&niveau=L3"
+            f"/api/public/groupes?ufrId={ufr_par_defaut()}&departement=Inexistante&niveau=L3"
         )
         self.assertEqual(inexistant.status_code, 200)
         self.assertEqual(inexistant.json()["groupes"], [])
@@ -176,7 +176,7 @@ class SurfacePubliqueEtablissementsTests(TestCase):
             id="ufr-ibam", nom="Institut Burkinabè des Arts et Métiers", sigle="ibam",
             type=TypeEtablissement.INSTITUT,
         )
-        self.groupe_institut = creer_groupe("L1 Gestion - Groupe A", filiere="Gestion", niveau="L1", ufr_id="ufr-ibam")
+        self.groupe_institut = creer_groupe("L1 Gestion - Groupe A", departement="Gestion", niveau="L1", ufr_id="ufr-ibam")
         Creneau.objects.create(
             ue=creer_ue("Comptabilité", code="IBAM101", ufr_id="ufr-ibam"),
             enseignant=creer_enseignant("Sanou", "Adama", ufr_id="ufr-ibam"),
@@ -187,7 +187,7 @@ class SurfacePubliqueEtablissementsTests(TestCase):
         # Une UFR avec un groupe, pour comparer les deux formes de sigle
         # dans la même réponse — la cascade ne liste que les établissements
         # qui mènent réellement à un programme (FR-PUB-02).
-        groupe_ufr = creer_groupe("L1 Info - Groupe A", filiere="Informatique", niveau="L1")
+        groupe_ufr = creer_groupe("L1 Info - Groupe A", departement="Informatique", niveau="L1")
         Creneau.objects.create(
             ue=creer_ue("Algorithmique", code="TEST101"),
             enseignant=creer_enseignant("Kaboré", "Ismaël"),

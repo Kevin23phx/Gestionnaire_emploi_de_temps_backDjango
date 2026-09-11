@@ -39,13 +39,13 @@ def _valider_effectif(effectif) -> int:
     return valeur
 
 
-def create_groupe(nom: str, filiere: str, niveau: str, annee_academique: str, effectif, ufr_id: str) -> Groupe:
+def create_groupe(nom: str, departement: str, niveau: str, annee_academique: str, effectif, ufr_id: str) -> Groupe:
     nom_trim = nom.strip()
     if Groupe.objects.filter(nom__iexact=nom_trim).exists():
         raise Conflict("Un groupe porte déjà ce nom.")
     return Groupe.objects.create(
         nom=nom_trim,
-        filiere=filiere.strip(),
+        departement=departement.strip(),
         niveau=niveau.strip(),
         annee_academique=annee_academique.strip(),
         effectif=_valider_effectif(effectif),
@@ -72,7 +72,7 @@ def update_groupe(groupe_id: str, donnees: dict, user) -> Groupe:
             raise Conflict("Un groupe porte déjà ce nom.")
         groupe.nom = nom_trim
         champs.append("nom")
-    for champ, cle in (("filiere", "filiere"), ("niveau", "niveau"), ("annee_academique", "anneeAcademique")):
+    for champ, cle in (("departement", "departement"), ("niveau", "niveau"), ("annee_academique", "anneeAcademique")):
         if cle in donnees:
             setattr(groupe, champ, (donnees[cle] or "").strip())
             champs.append(champ)

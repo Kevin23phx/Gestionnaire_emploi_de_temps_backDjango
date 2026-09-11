@@ -46,11 +46,11 @@ class DonneesOfficiellesTests(TestCase):
             minuscules = [d.lower() for d in departements]
             self.assertEqual(len(minuscules), len(set(minuscules)), sigle)
 
-    def test_les_filieres_proches_restent_distinctes(self):
+    def test_les_departements_proches_restent_distincts(self):
         """Arbitrage de la scolarité du 2026-09-07 : « Philosophie
         -Psychologie » / « Pshychologie » et « Médecine et Spécialités
-        médicales » / « Medecine » sont des filières à part entière, aux
-        contenus différents — PAS des doublons.
+        médicales » / « Medecine » sont des départements à part entière,
+        aux contenus différents — PAS des doublons.
 
         Ce test est un garde-fou contre une future « correction » de bonne
         foi : quiconque fusionnerait ces paires en les prenant pour des
@@ -187,11 +187,11 @@ class CoherenceSeedTests(TestCase):
     comme un doublon, alors que la cause était une incohérence du seed.
 
     Ce test relit le seed lui-même : c'est le seul endroit où l'écart peut
-    être attrapé, la base ne contraignant pas `Groupe.filiere` (chaîne
+    être attrapé, la base ne contraignant pas `Groupe.departement` (chaîne
     dénormalisée volontaire, cf. referentiel/models.py).
     """
 
-    def test_toute_filiere_seedee_est_un_departement_officiel(self):
+    def test_tout_departement_de_groupe_est_officiel(self):
         from io import StringIO
 
         from django.core.management import call_command
@@ -202,9 +202,9 @@ class CoherenceSeedTests(TestCase):
 
         officiels = {(d.ufr_id, d.libelle) for d in Departement.objects.all()}
         ecarts = [
-            f"{g.nom} ({g.ufr_id}) → filière {g.filiere!r} absente du référentiel"
+            f"{g.nom} ({g.ufr_id}) → département {g.departement!r} absent du référentiel"
             for g in Groupe.objects.all()
-            if (g.ufr_id, g.filiere) not in officiels
+            if (g.ufr_id, g.departement) not in officiels
         ]
         self.assertEqual(ecarts, [], "\n".join(ecarts))
 

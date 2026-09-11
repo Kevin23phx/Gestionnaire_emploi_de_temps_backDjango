@@ -4,7 +4,7 @@ from public.views import (
     AlertesView,
     CalendrierView,
     CleAlerteView,
-    FilieresView,
+    DepartementsView,
     GroupesView,
     NiveauxView,
     ProgrammeView,
@@ -17,7 +17,7 @@ from public.views import (
 # projet n'est publique : voir la note dans config/urls.py.
 urlpatterns = [
     path("api/public/ufrs", UfrsView.as_view()),
-    path("api/public/filieres", FilieresView.as_view()),
+    path("api/public/departements", DepartementsView.as_view()),
     path("api/public/niveaux", NiveauxView.as_view()),
     path("api/public/groupes", GroupesView.as_view()),
     path("api/public/programme/<str:groupe_id>", ProgrammeView.as_view()),

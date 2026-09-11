@@ -11,7 +11,7 @@ class GroupeSerializer(serializers.ModelSerializer):
         model = Groupe
         # [V3.1] "effectif" est une colonne du modèle : plus de
         # SerializerMethodField, plus de COUNT à recalculer.
-        fields = ["id", "nom", "filiere", "niveau", "anneeAcademique", "ufrId", "effectif"]
+        fields = ["id", "nom", "departement", "niveau", "anneeAcademique", "ufrId", "effectif"]
 
 
 class DepartementSerializer(serializers.ModelSerializer):

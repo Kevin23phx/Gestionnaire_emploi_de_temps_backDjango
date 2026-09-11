@@ -45,26 +45,26 @@ def list_ufrs() -> list[dict]:
     ]
 
 
-def list_filieres(ufr_id: str) -> list[str]:
+def list_departements(ufr_id: str) -> list[str]:
     return sorted(
-        Groupe.objects.filter(ufr_id=ufr_id).values_list("filiere", flat=True).distinct()
+        Groupe.objects.filter(ufr_id=ufr_id).values_list("departement", flat=True).distinct()
     )
 
 
-def list_niveaux(ufr_id: str, filiere: str) -> list[str]:
+def list_niveaux(ufr_id: str, departement: str) -> list[str]:
     return sorted(
-        Groupe.objects.filter(ufr_id=ufr_id, filiere=filiere).values_list("niveau", flat=True).distinct()
+        Groupe.objects.filter(ufr_id=ufr_id, departement=departement).values_list("niveau", flat=True).distinct()
     )
 
 
-def list_groupes(ufr_id: str, filiere: str, niveau: str) -> list[dict]:
+def list_groupes(ufr_id: str, departement: str, niveau: str) -> list[dict]:
     """Dernier étage de la cascade. Le nombre de créneaux accompagne chaque
     groupe pour que le visiteur distingue, AVANT de cliquer, un programme
     rempli d'un programme encore vide (ERR-07)."""
     from django.db.models import Count
 
     groupes = (
-        Groupe.objects.filter(ufr_id=ufr_id, filiere=filiere, niveau=niveau)
+        Groupe.objects.filter(ufr_id=ufr_id, departement=departement, niveau=niveau)
         .annotate(nb_creneaux=Count("creneaux"))
         .order_by("nom")
     )
@@ -72,7 +72,7 @@ def list_groupes(ufr_id: str, filiere: str, niveau: str) -> list[dict]:
         {
             "id": g.id,
             "nom": g.nom,
-            "filiere": g.filiere,
+            "departement": g.departement,
             "niveau": g.niveau,
             "anneeAcademique": g.annee_academique,
             "nbCreneaux": g.nb_creneaux,
@@ -151,7 +151,7 @@ def programme_semaine(groupe_id: str, semaine: str | None) -> dict:
         "groupe": {
             "id": groupe.id,
             "nom": groupe.nom,
-            "filiere": groupe.filiere,
+            "departement": groupe.departement,
             "niveau": groupe.niveau,
             "anneeAcademique": groupe.annee_academique,
             "ufr": {
