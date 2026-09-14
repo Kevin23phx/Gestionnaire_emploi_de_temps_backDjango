@@ -8,7 +8,7 @@ from accounts.session_utils import generate_session_token, hash_session_token
 def _cookie_kwargs() -> dict:
     return dict(
         httponly=True,
-        samesite="Lax",
+        samesite=settings.SESSION_COOKIE_SAMESITE,
         secure=settings.SESSION_COOKIE_SECURE,
         path="/",
         max_age=int(settings.SESSION_TTL.total_seconds()),

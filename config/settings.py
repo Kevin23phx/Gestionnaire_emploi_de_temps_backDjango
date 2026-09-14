@@ -146,6 +146,13 @@ if DEBUG:
 SESSION_COOKIE_NAME = "cm_session"
 SESSION_TTL = timedelta(hours=int(os.environ.get("SESSION_TTL_HOURS", "8")))
 SESSION_COOKIE_SECURE = not DEBUG
+# "Lax" suffit en dev (front et back sur localhost, ports différents mais
+# même site). En production, front (Cloudflare) et back (Render) sont deux
+# domaines distincts : "Lax" y bloquerait purement et simplement l'envoi du
+# cookie sur les appels cross-site, "None" est donc nécessaire — valide
+# uniquement combiné à Secure (garanti ci-dessus dès que DEBUG=false, jamais
+# l'un sans l'autre).
+SESSION_COOKIE_SAMESITE = "Lax" if DEBUG else "None"
 
 # ---------------------------------------------------------------------------
 # Django REST Framework — authentification et gestion d'erreurs qui
