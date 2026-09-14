@@ -48,13 +48,35 @@ class Groupe(models.Model):
     annee_academique = models.CharField(max_length=16)
     effectif = models.PositiveIntegerField(default=0)
 
+    # [V6] FR-REF-12 le disait depuis la V2 ("une promotion se fait en créant
+    # un nouveau Groupe, jamais en modifiant celui-ci sur place") sans que le
+    # mécanisme existe jamais : le Gestionnaire ressaisissait le groupe de
+    # zéro chaque rentrée. `promu_de` relie le groupe de l'année N+1 à celui
+    # dont il descend en N — trace de filiation, jamais modifiée après coup
+    # (comme un Creneau déplacé garde son fantôme, cf. V4). OneToOne : un
+    # groupe ne peut être promu qu'une seule fois (empêche de créer deux L2
+    # à partir du même L1 par erreur de double clic).
+    promu_de = models.OneToOneField(
+        "self", null=True, blank=True, on_delete=models.SET_NULL, related_name="groupe_suivant"
+    )
+
     ufr = models.ForeignKey(Ufr, related_name="groupes", on_delete=models.PROTECT)
 
     class Meta:
         db_table = "groupe"
         indexes = [models.Index(fields=["ufr"])]
         constraints = [
-            models.UniqueConstraint(Lower("nom"), name="groupe_nom_lower_unique"),
+            # [V6] Unicité PAR ANNÉE ACADÉMIQUE, plus globale. Avant le
+            # passage de niveau (FR-REF-29), un nom de groupe historique ne
+            # restait jamais indéfiniment en base au même niveau qu'un
+            # groupe actif — la question ne se posait pas. Depuis, le groupe
+            # d'une année promue (ex. "L1 Médecine - Groupe A", 2025-2026)
+            # est délibérément conservé (historique, jamais supprimé). Une
+            # unicité globale interdirait alors pour toujours de nommer ainsi
+            # la PROCHAINE promotion de L1 (nouveaux admis 2026-2027) — un nom
+            # de cohorte est censé se répéter d'année en année, pas être
+            # consommé une fois pour toutes.
+            models.UniqueConstraint(Lower("nom"), "annee_academique", name="groupe_nom_lower_annee_unique"),
         ]
 
     def __str__(self) -> str:

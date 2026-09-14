@@ -85,6 +85,22 @@ class GroupeDetailView(APIView):
         return Response({"groupe": GroupeSerializer(groupe).data})
 
 
+class GroupesPassageView(APIView):
+    """[V6] FR-REF-12 — passage à l'année supérieure. Une seule requête pour
+    toute la campagne (tout-ou-rien, cf. groupes_service.promouvoir_groupes) :
+    le Gestionnaire réunit dans un même écran tous les groupes éligibles
+    d'une année, ajuste chaque effectif, puis valide en bloc."""
+
+    permission_classes = [require_roles("scolarite")]
+
+    def post(self, request):
+        _requis(request.data, "anneeAcademiqueCible", "groupes")
+        groupes = groupes_service.promouvoir_groupes(
+            request.data["groupes"], request.data["anneeAcademiqueCible"], request.user
+        )
+        return Response({"groupes": GroupeSerializer(groupes, many=True).data}, status=201)
+
+
 class SallesView(APIView):
     def get_permissions(self):
         if self.request.method == "POST":

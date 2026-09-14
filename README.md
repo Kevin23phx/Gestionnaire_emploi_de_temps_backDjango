@@ -206,15 +206,17 @@ python manage.py runserver 0.0.0.0:3001
 Le frontend (`../web/`, `NEXT_PUBLIC_API_URL=http://localhost:3001/api`) s'y
 connecte sans configuration supplémentaire.
 
-## Données de démonstration
+## Données
 
-```bash
-bash scripts/seed.sh
-```
-
-Comptes créés (mot de passe `password` pour tous) : voir la sortie du script
-— un admin (`scolarite.general`), un Gestionnaire par UFR
-(`scolarite.sh/sds/svt/sea/lac`), un étudiant et un enseignant de démo.
+`scripts/seed.sh` a été retiré (2026-09-14) : la commande `manage.py seed`
+qu'il appelait vide entièrement les tables avant de recréer un jeu de
+démonstration — incompatible avec des données réelles saisies à la main en
+cours de développement. La commande `seed` (`core/management/commands/`)
+reste dans le code, mais uniquement comme fixture interne d'un test de
+non-régression (`CoherenceSeedTests`, qui la rejoue contre la base de test
+jetable pour vérifier que chaque département de groupe reste un département
+officiel) — **elle ne doit plus être exécutée contre la base de
+développement.**
 
 ## Tests
 
@@ -227,9 +229,9 @@ cloisonnement multi-UFR (création d'UFR/Gestionnaire, isolation du
 référentiel/planning/audit entre UFR, affectation automatique d'un
 enseignant jamais bloquante), le moteur de détection de conflits (salle,
 enseignant, groupe, capacité, pauses fixes) et l'import/promotion
-d'étudiants. Tourne avec le rôle superutilisateur (comme `scripts/seed.sh`)
-car un test vérifie explicitement les droits du rôle applicatif restreint
-via une connexion séparée.
+d'étudiants. Tourne avec le rôle superutilisateur car un test vérifie
+explicitement les droits du rôle applicatif restreint via une connexion
+séparée.
 
 `[V3]` Deux fichiers portent les garanties nouvelles, et ce sont les plus
 importants de la suite :

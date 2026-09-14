@@ -5,6 +5,7 @@ from referentiel.views import (
     CoursView,
     DepartementsView,
     GroupeDetailView,
+    GroupesPassageView,
     GroupesView,
     SallesView,
 )
@@ -14,6 +15,9 @@ from referentiel.views import (
 # saisi (voir referentiel/models.py).
 urlpatterns = [
     path("api/departements", DepartementsView.as_view()),
+    # [V6] "passage" AVANT "<str:groupe_id>" — sinon Django résout
+    # /api/groupes/passage comme GroupeDetailView avec groupe_id="passage".
+    path("api/groupes/passage", GroupesPassageView.as_view()),
     path("api/groupes", GroupesView.as_view()),
     path("api/groupes/<str:groupe_id>", GroupeDetailView.as_view()),
     path("api/salles", SallesView.as_view()),
