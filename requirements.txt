@@ -6,3 +6,6 @@ argon2-cffi==25.1.0
 python-dotenv==1.2.3
 # [V3] Alertes Web Push (FR-PUB-08) — voir README, section « Alertes Web Push ».
 pywebpush==2.0.3
+# Serveur WSGI de production (Render) — manage.py runserver n'est pas fait
+# pour ça (avertissement affiché à chaque démarrage en développement).
+gunicorn==23.0.0
