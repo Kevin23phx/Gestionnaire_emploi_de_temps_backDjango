@@ -30,7 +30,7 @@ def _departements_de_l_etablissement(departement_ids: list[str] | None, ufr_id: 
 
 @transaction.atomic
 def create_cours(
-    intitule: str, code: str | None, niveau: str, ufr_id: str, departement_ids: list[str] | None = None
+    intitule: str, code: str | None, ufr_id: str, departement_ids: list[str] | None = None
 ) -> UniteEnseignement:
     intitule_trim = intitule.strip()
     if UniteEnseignement.objects.filter(intitule__iexact=intitule_trim).exists():
@@ -40,7 +40,7 @@ def create_cours(
 
     # "—" par défaut si aucun code n'est fourni.
     cours = UniteEnseignement.objects.create(
-        intitule=intitule_trim, code=(code or "").strip() or "—", niveau=niveau.strip(), ufr_id=ufr_id
+        intitule=intitule_trim, code=(code or "").strip() or "—", ufr_id=ufr_id
     )
     cours.departements.set(departements)
     return cours
@@ -76,9 +76,6 @@ def update_cours(cours_id: str, donnees: dict, user) -> UniteEnseignement:
     if "code" in donnees:
         cours.code = (donnees["code"] or "").strip() or "—"
         champs.append("code")
-    if "niveau" in donnees:
-        cours.niveau = (donnees["niveau"] or "").strip()
-        champs.append("niveau")
     if champs:
         cours.save(update_fields=champs)
 

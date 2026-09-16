@@ -138,10 +138,19 @@ class DepartementsApiTests(TestCase):
     def test_libelle_vide_refuse(self):
         self.assertEqual(post_json(self.client_sco, "/api/departements", {"libelle": "   "}).status_code, 400)
 
-    def test_un_admin_ne_cree_pas_de_departement(self):
-        """INV-11 : l'Admin n'écrit jamais dans le référentiel d'un
-        établissement."""
-        self.assertEqual(post_json(self.client_admin, "/api/departements", {"libelle": "X"}).status_code, 403)
+    def test_un_admin_cree_un_departement_avec_ufr_id_explicite(self):
+        """[V7] Exception ciblée à INV-11 : retour des gestionnaires, l'Admin
+        doit pouvoir créer un département si le Gestionnaire de l'UFR n'est
+        pas disponible — mais seulement en désignant l'UFR explicitement,
+        l'Admin n'en ayant aucune en session."""
+        res = post_json(self.client_admin, "/api/departements", {"libelle": "Chimie", "ufrId": "ufr-b"})
+        self.assertEqual(res.status_code, 201)
+        self.assertTrue(Departement.objects.filter(ufr_id="ufr-b", libelle="Chimie").exists())
+
+    def test_un_admin_sans_ufr_id_est_refuse(self):
+        """L'ufrId ne peut pas être omis pour un Admin : il n'a pas d'UFR de
+        session vers laquelle se replier."""
+        self.assertEqual(post_json(self.client_admin, "/api/departements", {"libelle": "X"}).status_code, 400)
 
     def test_un_anonyme_ne_lit_pas_les_departements(self):
         """INT-10 : le référentiel de gestion reste fermé. La cascade
@@ -233,7 +242,7 @@ class CoursDepartementsTests(TestCase):
         res = post_json(
             self.client_sco,
             "/api/cours",
-            {"intitule": "Mathématiques", "niveau": "L1", "departementIds": [self.info.id, self.physique.id]},
+            {"intitule": "Mathématiques", "departementIds": [self.info.id, self.physique.id]},
         )
         self.assertEqual(res.status_code, 201)
         libelles = sorted(d["libelle"] for d in res.json()["ue"]["departements"])
@@ -243,7 +252,7 @@ class CoursDepartementsTests(TestCase):
         """Comme l'effectif à zéro : accepté, mais l'écran le signale. Refuser
         bloquerait la saisie d'un cours dont le rattachement n'est pas encore
         arbitré."""
-        res = post_json(self.client_sco, "/api/cours", {"intitule": "Cours orphelin", "niveau": "L2"})
+        res = post_json(self.client_sco, "/api/cours", {"intitule": "Cours orphelin"})
         self.assertEqual(res.status_code, 201)
         self.assertEqual(res.json()["ue"]["departements"], [])
 
@@ -253,7 +262,7 @@ class CoursDepartementsTests(TestCase):
         res = post_json(
             self.client_sco,
             "/api/cours",
-            {"intitule": "Cours hors périmètre", "niveau": "L1", "departementIds": [self.chez_b.id]},
+            {"intitule": "Cours hors périmètre", "departementIds": [self.chez_b.id]},
         )
         self.assertEqual(res.status_code, 400)
 
@@ -261,7 +270,7 @@ class CoursDepartementsTests(TestCase):
         """Les cours créés avant la V3.3 n'ont aucun département : sans route
         de modification, il faudrait les supprimer — ce que le référentiel
         interdit dès qu'un créneau les référence."""
-        cree = post_json(self.client_sco, "/api/cours", {"intitule": "Ancien cours", "niveau": "L3"}).json()["ue"]
+        cree = post_json(self.client_sco, "/api/cours", {"intitule": "Ancien cours"}).json()["ue"]
         res = self.client_sco.patch(
             f"/api/cours/{cree['id']}",
             data=json.dumps({"departementIds": [self.info.id]}),
@@ -276,7 +285,7 @@ class CoursDepartementsTests(TestCase):
         cree = post_json(
             self.client_sco,
             "/api/cours",
-            {"intitule": "Cours évolutif", "niveau": "L1", "departementIds": [self.info.id, self.physique.id]},
+            {"intitule": "Cours évolutif", "departementIds": [self.info.id, self.physique.id]},
         ).json()["ue"]
         res = self.client_sco.patch(
             f"/api/cours/{cree['id']}",

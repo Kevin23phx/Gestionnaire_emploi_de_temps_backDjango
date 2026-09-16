@@ -43,10 +43,15 @@ def stats(user, date_from=None, date_to=None, ufr_id_pour_admin=None) -> dict:
 
 
 def _calculer_taux_occupation(scope) -> int:
+    # [2026-09] Les salles ne sont plus rattachées à une UFR (exception à
+    # INT-07, cf. 03_Contrat_Invariants_Campus_Manager.md [V7]) : le
+    # dénominateur (nombre de salles) est donc toujours celui du référentiel
+    # entier, même pour le tableau de bord d'une seule UFR — cohérent avec
+    # le fait qu'un Gestionnaire peut désormais utiliser n'importe quelle
+    # salle, pas seulement celles "de son UFR".
     salles_qs = Salle.objects.all()
     creneaux_qs = Creneau.objects.exclude(statut="annule")
     if not scope.toutes:
-        salles_qs = salles_qs.filter(ufr_id__in=scope.ufr_ids)
         creneaux_qs = creneaux_qs.filter(groupe__ufr_id__in=scope.ufr_ids)
 
     salles = salles_qs.count()

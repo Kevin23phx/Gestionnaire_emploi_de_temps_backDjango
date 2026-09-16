@@ -181,7 +181,7 @@ class SurfacePubliqueEtablissementsTests(TestCase):
             ue=creer_ue("Comptabilité", code="IBAM101", ufr_id="ufr-ibam"),
             enseignant=creer_enseignant("Sanou", "Adama", ufr_id="ufr-ibam"),
             groupe=self.groupe_institut,
-            salle=creer_salle("Salle IBAM", 80, ufr_id="ufr-ibam"),
+            salle=creer_salle("Salle IBAM", 80),
             date=jour("lundi"), heure_debut_minutes=8 * 60, heure_fin_minutes=10 * 60,
         )
         # Une UFR avec un groupe, pour comparer les deux formes de sigle

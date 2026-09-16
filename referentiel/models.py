@@ -6,19 +6,16 @@ from core.utils import generate_id
 
 
 class TypeUsageSalle(models.TextChoices):
-    PROPRE = "propre"
-    COMMUNE = "commune"
-    LOUEE = "louee"
-    GRATUITE = "gratuite"
+    """[2026-09] Usage pédagogique de la salle — retour des gestionnaires
+    lors de la présentation : l'ancien enum (propre/commune/louée/gratuite)
+    décrivait en réalité qui gère la salle. Ce champ dit À QUOI la salle
+    sert, seule classification qui reste (cf. Salle, plus bas : la salle
+    n'a plus d'UFR propriétaire du tout)."""
 
-
-class StructureGestionnaire(models.TextChoices):
-    """"UFR" (ufr_id renseigné) ou "DEP" (salle commune/louée transversale,
-    ufr_id toujours null, administrée par l'Admin — cf. 01_PRD note
-    2026-08-27)."""
-
-    UFR = "UFR"
-    DEP = "DEP"
+    COURS = "cours", "Cours"
+    TD = "td", "TD"
+    TP = "tp", "TP"
+    LABORATOIRE = "laboratoire", "Laboratoire"
 
 
 class Groupe(models.Model):
@@ -84,33 +81,29 @@ class Groupe(models.Model):
 
 
 class Salle(models.Model):
-    """"structure_gestionnaire" = "UFR" (ufr_id non-null) ou "DEP" (ufr_id
-    toujours null) — jamais saisi librement par le client, dérivé du
-    contexte de création (rôle de l'appelant, cf. referentiel/services.py)."""
+    """[2026-09] Retour des gestionnaires : plus d'appartenance à une UFR
+    (ni "structure_gestionnaire" UFR/DEP, ni FK `ufr`). Une salle est un
+    référentiel unique, université entière — n'importe quel Gestionnaire ou
+    l'Admin peut en créer une et toutes les utiliser, précisément pour
+    couvrir le cas où les salles propres à une UFR sont toutes occupées.
+    C'est une exception délibérée, ciblée sur ce seul référentiel, à
+    INT-07 (cf. 03_Contrat_Invariants_Campus_Manager.md [V7]) : le
+    cloisonnement inter-UFR reste entier sur le planning, les conflits et
+    l'audit — seule la liste des salles devient partagée. Seule
+    l'unicité du nom est encore garantie (`salle_nom_lower_unique`).
+
+    Pas de champ "bâtiment" non plus : retour des gestionnaires, ce n'est
+    pas une information nécessaire à la saisie d'une salle."""
 
     id = models.CharField(primary_key=True, max_length=64, default=generate_id, editable=False)
     nom = models.CharField(max_length=255)
-    batiment = models.CharField(max_length=255)
     capacite = models.PositiveIntegerField()
-    structure_gestionnaire = models.CharField(
-        max_length=8, choices=StructureGestionnaire.choices, default=StructureGestionnaire.UFR
-    )
     type_usage = models.CharField(max_length=16, choices=TypeUsageSalle.choices)
-
-    ufr = models.ForeignKey(Ufr, related_name="salles", on_delete=models.PROTECT, null=True, blank=True)
 
     class Meta:
         db_table = "salle"
-        indexes = [models.Index(fields=["ufr"])]
         constraints = [
             models.UniqueConstraint(Lower("nom"), name="salle_nom_lower_unique"),
-            models.CheckConstraint(
-                condition=(
-                    (models.Q(structure_gestionnaire=StructureGestionnaire.UFR) & models.Q(ufr__isnull=False))
-                    | (models.Q(structure_gestionnaire=StructureGestionnaire.DEP) & models.Q(ufr__isnull=True))
-                ),
-                name="salle_structure_gestionnaire_coherente",
-            ),
         ]
 
     def __str__(self) -> str:
@@ -118,8 +111,9 @@ class Salle(models.Model):
 
 
 class UniteEnseignement(models.Model):
-    """"niveau" (FR-REF-13, L1...M2) : à quel niveau ce cours s'adresse —
-    affiché à côté de l'intitulé, indépendant de l'année académique.
+    """[2026-09] Pas de champ "niveau" séparé : retour des gestionnaires,
+    le code du cours porte déjà cette information, un champ dédié ferait
+    doublon.
 
     [V3.3] "departements" : à quels départements ce cours est dispensé.
     **Plusieurs**, et c'est le point : un cours mutualisé (« Tronc Commun
@@ -137,7 +131,6 @@ class UniteEnseignement(models.Model):
     id = models.CharField(primary_key=True, max_length=64, default=generate_id, editable=False)
     code = models.CharField(max_length=64, null=True, blank=True)
     intitule = models.CharField(max_length=255)
-    niveau = models.CharField(max_length=32)
 
     ufr = models.ForeignKey(Ufr, related_name="ues", on_delete=models.PROTECT)
     departements = models.ManyToManyField("referentiel.Departement", related_name="cours", blank=True)

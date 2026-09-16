@@ -143,7 +143,7 @@ def _evenement(creneau: Creneau) -> list[str]:
         f"DTSTART;TZID={TZID}:{_horodatage(creneau.date, creneau.heure_debut_minutes)}",
         f"DTEND;TZID={TZID}:{_horodatage(creneau.date, creneau.heure_fin_minutes)}",
         f"SUMMARY:{_echapper(titre)}",
-        f"LOCATION:{_echapper(f'{creneau.salle.nom} — {creneau.salle.batiment}')}",
+        f"LOCATION:{_echapper(creneau.salle.nom)}",
         f"DESCRIPTION:{_echapper(chr(10).join(description))}",
         # Volontairement CONFIRMED même pour une séance annulée : un
         # événement marqué CANCELLED est masqué par la plupart des agendas,
@@ -183,7 +183,7 @@ def _fantome_deplacement(creneau: Creneau, aujourdhui: datetime.date) -> list[st
         f"DTSTART;TZID={TZID}:{_horodatage(creneau.ancienne_date, creneau.ancien_heure_debut_minutes)}",
         f"DTEND;TZID={TZID}:{_horodatage(creneau.ancienne_date, creneau.ancien_heure_fin_minutes)}",
         f"SUMMARY:{_echapper(f'DÉPLACÉ — {creneau.ue.intitule}')}",
-        f"LOCATION:{_echapper(f'{creneau.salle.nom} — {creneau.salle.batiment}')}",
+        f"LOCATION:{_echapper(creneau.salle.nom)}",
         f"DESCRIPTION:{_echapper(f'Ce cours a été déplacé au {nouveau}, salle {creneau.salle.nom}.')}",
         "STATUS:CONFIRMED",
         "TRANSP:TRANSPARENT",

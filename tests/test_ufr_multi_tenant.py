@@ -69,17 +69,19 @@ class UfrMultiTenantTests(TestCase):
         res_groupe = post_json(self.client_a, "/api/groupes", {"nom": "Nouveau Groupe A", "departement": "Informatique", "niveau": "L1", "anneeAcademique": "2025-2026"})
         self.assertEqual(res_groupe.json()["groupe"]["ufrId"], "ufr-a")
 
-        res_salle = post_json(self.client_a, "/api/salles", {"nom": "Salle Test A", "batiment": "Bât. A", "capacite": 30, "typeUsage": "propre"})
-        self.assertEqual(res_salle.json()["salle"]["ufrId"], "ufr-a")
-        self.assertEqual(res_salle.json()["salle"]["structureGestionnaire"], "UFR")
-
-        res_cours = post_json(self.client_a, "/api/cours", {"intitule": "Cours Test A", "niveau": "L1"})
+        res_cours = post_json(self.client_a, "/api/cours", {"intitule": "Cours Test A"})
         self.assertEqual(res_cours.json()["ue"]["ufrId"], "ufr-a")
 
-    def test_admin_ne_cree_que_des_salles_dep(self):
-        res = post_json(self.client_admin, "/api/salles", {"nom": "Amphi Commun DEP", "batiment": "Bât. Central", "capacite": 500, "typeUsage": "commune"})
-        self.assertEqual(res.json()["salle"]["structureGestionnaire"], "DEP")
-        self.assertIsNone(res.json()["salle"]["ufrId"])
+    def test_les_salles_sont_un_referentiel_partage_entre_ufr(self):
+        """[V7] Exception ciblée à INT-07 : les salles ne sont plus
+        rattachées à une UFR — n'importe quel Gestionnaire (ou l'Admin) crée
+        une salle et tous la voient, y compris une autre UFR."""
+        res = post_json(self.client_a, "/api/salles", {"nom": "Amphi Partagé", "capacite": 500, "typeUsage": "cours"})
+        self.assertEqual(res.status_code, 201)
+        self.assertNotIn("ufrId", res.json()["salle"])
+
+        vue_par_b = self.client_b.get("/api/salles").json()["salles"]
+        self.assertIn("Amphi Partagé", [s["nom"] for s in vue_par_b])
 
     # --- Groupes (effectif saisi, [V3.1]) ---
 
@@ -118,7 +120,7 @@ class UfrMultiTenantTests(TestCase):
 
     def test_rejette_creation_creneau_sur_groupe_d_une_autre_ufr(self):
         ue = creer_ue("Cours UFR-B", "COD-B", "ufr-b")
-        salle = creer_salle("Salle UFR-B", 50, ufr_id="ufr-b")
+        salle = creer_salle("Salle UFR-B", 50)
         ens = creer_enseignant("Sawadogo", "Boukary")
 
         res = post_json(
@@ -133,7 +135,7 @@ class UfrMultiTenantTests(TestCase):
         le cours doit pouvoir être affecté — l'affectation à l'UFR se fait
         automatiquement, jamais un blocus."""
         ue = creer_ue("Cours UFR-A externe", "COD-EXT", "ufr-a")
-        salle = creer_salle("Salle Test Externe", 40, ufr_id="ufr-a")
+        salle = creer_salle("Salle Test Externe", 40)
         ens_externe = creer_enseignant("Diallo", "Karim")  # affecté par défaut à "ufr-test", étranger à ufr-a
 
         res = post_json(
@@ -162,7 +164,7 @@ class UfrMultiTenantTests(TestCase):
 
     def test_audit_ne_fuite_jamais_entre_ufr(self):
         ue = creer_ue("Cours Audit UFR-B", "COD-AUD-B", "ufr-b")
-        salle = creer_salle("Salle Audit UFR-B", 50, ufr_id="ufr-b")
+        salle = creer_salle("Salle Audit UFR-B", 50)
         ens = creer_enseignant("Kagambega", "Rasmané", ufr_id="ufr-b")
 
         res = post_json(

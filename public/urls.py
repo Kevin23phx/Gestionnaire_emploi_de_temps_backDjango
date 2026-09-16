@@ -2,6 +2,7 @@ from django.urls import path
 
 from public.views import (
     AlertesView,
+    AnneesView,
     CalendrierView,
     CleAlerteView,
     DepartementsView,
@@ -16,6 +17,7 @@ from public.views import (
 # n'écrit que sa propre table d'abonnements anonymes. Aucune autre route du
 # projet n'est publique : voir la note dans config/urls.py.
 urlpatterns = [
+    path("api/public/annees", AnneesView.as_view()),
     path("api/public/ufrs", UfrsView.as_view()),
     path("api/public/departements", DepartementsView.as_view()),
     path("api/public/niveaux", NiveauxView.as_view()),

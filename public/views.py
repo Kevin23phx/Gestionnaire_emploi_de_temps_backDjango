@@ -26,11 +26,18 @@ def _requis(params, *champs: str) -> None:
             raise ValidationError(f"Le paramètre '{champ}' est obligatoire.")
 
 
+class AnneesView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        return Response({"annees": services.list_annees()})
+
+
 class UfrsView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
-        return Response({"ufrs": services.list_ufrs()})
+        return Response({"ufrs": services.list_ufrs(request.query_params.get("anneeAcademique"))})
 
 
 class DepartementsView(APIView):
@@ -38,7 +45,13 @@ class DepartementsView(APIView):
 
     def get(self, request):
         _requis(request.query_params, "ufrId")
-        return Response({"departements": services.list_departements(request.query_params["ufrId"])})
+        return Response(
+            {
+                "departements": services.list_departements(
+                    request.query_params["ufrId"], request.query_params.get("anneeAcademique")
+                )
+            }
+        )
 
 
 class NiveauxView(APIView):
@@ -47,7 +60,13 @@ class NiveauxView(APIView):
     def get(self, request):
         _requis(request.query_params, "ufrId", "departement")
         return Response(
-            {"niveaux": services.list_niveaux(request.query_params["ufrId"], request.query_params["departement"])}
+            {
+                "niveaux": services.list_niveaux(
+                    request.query_params["ufrId"],
+                    request.query_params["departement"],
+                    request.query_params.get("anneeAcademique"),
+                )
+            }
         )
 
 
@@ -62,6 +81,7 @@ class GroupesView(APIView):
                     request.query_params["ufrId"],
                     request.query_params["departement"],
                     request.query_params["niveau"],
+                    request.query_params.get("anneeAcademique"),
                 )
             }
         )

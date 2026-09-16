@@ -55,12 +55,12 @@ def prochain(nom: str, apres: datetime.date | None = None) -> datetime.date:
     return depart + datetime.timedelta(days=(JOURS.index(nom) - depart.weekday()) % 7 or 7)
 
 
-def creer_ue(intitule: str, code: str = "COD1", ufr_id: str | None = None, niveau: str = "L3") -> UniteEnseignement:
-    return UniteEnseignement.objects.create(intitule=intitule, code=code, niveau=niveau, ufr_id=ufr_id or ufr_par_defaut())
+def creer_ue(intitule: str, code: str = "COD1", ufr_id: str | None = None) -> UniteEnseignement:
+    return UniteEnseignement.objects.create(intitule=intitule, code=code, ufr_id=ufr_id or ufr_par_defaut())
 
 
-def creer_salle(nom: str, capacite: int = 50, type_usage: str = "propre", ufr_id: str | None = None) -> Salle:
-    return Salle.objects.create(nom=nom, batiment="Bâtiment Test", capacite=capacite, type_usage=type_usage, ufr_id=ufr_id or ufr_par_defaut())
+def creer_salle(nom: str, capacite: int = 50, type_usage: str = "cours") -> Salle:
+    return Salle.objects.create(nom=nom, capacite=capacite, type_usage=type_usage)
 
 
 def creer_groupe(

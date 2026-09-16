@@ -26,14 +26,19 @@ class DepartementsView(APIView):
 
     Source de la liste déroulante « Filière » à la création d'un groupe.
     GET ouvert à tout compte authentifié (l'Admin en a besoin pour la
-    supervision) ; POST réservé au Gestionnaire, qui n'ouvre un département
-    que dans SON propre établissement — l'ufr_id vient de la session,
-    jamais de la requête (INT-07).
+    supervision).
+
+    POST réservé au Gestionnaire et à l'Admin. Un Gestionnaire n'ouvre un
+    département que dans SON propre établissement — l'ufr_id vient de la
+    session, jamais de la requête (INT-07). L'Admin, qui ne gère aucune UFR
+    en propre (FR-ADMIN-04), doit préciser explicitement l'UFR concernée
+    (retour des gestionnaires, 2026-09 : l'Admin doit pouvoir créer un
+    département si le Gestionnaire de l'UFR n'est pas disponible).
     """
 
     def get_permissions(self):
         if self.request.method == "POST":
-            return [require_roles("scolarite")()]
+            return [require_roles("scolarite", "admin")()]
         return super().get_permissions()  # IsAuthenticatedCM par défaut
 
     def get(self, request):
@@ -42,7 +47,12 @@ class DepartementsView(APIView):
 
     def post(self, request):
         _requis(request.data, "libelle")
-        departement = departements_service.create_departement(request.data["libelle"], request.user.ufr_id)
+        if request.user.role == "admin":
+            _requis(request.data, "ufrId")
+            ufr_id = request.data["ufrId"]
+        else:
+            ufr_id = request.user.ufr_id
+        departement = departements_service.create_departement(request.data["libelle"], ufr_id)
         return Response({"departement": DepartementSerializer(departement).data}, status=201)
 
 
@@ -108,13 +118,13 @@ class SallesView(APIView):
         return super().get_permissions()  # IsAuthenticatedCM par défaut
 
     def get(self, request):
-        salles = salles_service.list_salles(request.user, request.query_params.get("ufrId"))
+        salles = salles_service.list_salles()
         return Response({"salles": SalleSerializer(salles, many=True).data})
 
     def post(self, request):
-        _requis(request.data, "nom", "batiment", "capacite", "typeUsage")
+        _requis(request.data, "nom", "capacite", "typeUsage")
         salle = salles_service.create_salle(
-            request.data["nom"], request.data["batiment"], request.data["capacite"], request.data["typeUsage"], request.user
+            request.data["nom"], request.data["capacite"], request.data["typeUsage"]
         )
         return Response({"salle": SalleSerializer(salle).data}, status=201)
 
@@ -130,11 +140,10 @@ class CoursView(APIView):
         return Response({"cours": UniteEnseignementSerializer(cours, many=True).data})
 
     def post(self, request):
-        _requis(request.data, "intitule", "niveau")
+        _requis(request.data, "intitule")
         ue = cours_service.create_cours(
             request.data["intitule"],
             request.data.get("code"),
-            request.data["niveau"],
             request.user.ufr_id,
             request.data.get("departementIds"),
         )

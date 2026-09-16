@@ -31,13 +31,11 @@ class DepartementSerializer(serializers.ModelSerializer):
 
 
 class SalleSerializer(serializers.ModelSerializer):
-    structureGestionnaire = serializers.CharField(source="structure_gestionnaire")
     typeUsage = serializers.CharField(source="type_usage")
-    ufrId = serializers.CharField(source="ufr_id", allow_null=True)
 
     class Meta:
         model = Salle
-        fields = ["id", "nom", "batiment", "capacite", "structureGestionnaire", "ufrId", "typeUsage"]
+        fields = ["id", "nom", "capacite", "typeUsage"]
 
 
 class UniteEnseignementSerializer(serializers.ModelSerializer):
@@ -49,5 +47,5 @@ class UniteEnseignementSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = UniteEnseignement
-        fields = ["id", "code", "intitule", "niveau", "ufrId", "departements"]
+        fields = ["id", "code", "intitule", "ufrId", "departements"]
 

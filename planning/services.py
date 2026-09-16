@@ -36,7 +36,7 @@ def _effectifs_par_groupe(groupe_ids: list[str]) -> dict[str, int]:
 def _denormaliser(creneau: Creneau, effectif: int) -> dict:
     return {
         "id": creneau.id,
-        "ue": {"id": creneau.ue.id, "code": creneau.ue.code, "intitule": creneau.ue.intitule, "niveau": creneau.ue.niveau, "ufrId": creneau.ue.ufr_id},
+        "ue": {"id": creneau.ue.id, "code": creneau.ue.code, "intitule": creneau.ue.intitule, "ufrId": creneau.ue.ufr_id},
         "enseignant": {"id": creneau.enseignant.id, "nom": creneau.enseignant.nom, "prenom": creneau.enseignant.prenom},
         "groupe": {
             "id": creneau.groupe.id,
@@ -50,10 +50,7 @@ def _denormaliser(creneau: Creneau, effectif: int) -> dict:
         "salle": {
             "id": creneau.salle.id,
             "nom": creneau.salle.nom,
-            "batiment": creneau.salle.batiment,
             "capacite": creneau.salle.capacite,
-            "structureGestionnaire": creneau.salle.structure_gestionnaire,
-            "ufrId": creneau.salle.ufr_id,
             "typeUsage": creneau.salle.type_usage,
         },
         # [V4] La date réelle. "jour" reste fourni pour l'affichage, mais il

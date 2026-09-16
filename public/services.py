@@ -35,39 +35,53 @@ JOURS_INDEX = {jour: i for i, jour in enumerate(JOURS_ORDRE)}
 # programme réellement dépourvu de créneau.
 
 
-def list_ufrs() -> list[dict]:
+def list_annees() -> list[str]:
+    """[2026-09] Retour des gestionnaires : premier étage de la cascade
+    publique — un visiteur choisit d'abord son année académique, avant même
+    son établissement. Triées la plus récente en premier : c'est celle
+    qu'un visiteur cherche le plus souvent."""
+    return sorted(
+        Groupe.objects.values_list("annee_academique", flat=True).distinct(), reverse=True
+    )
+
+
+def list_ufrs(annee_academique: str | None = None) -> list[dict]:
+    groupes = Groupe.objects.all()
+    if annee_academique:
+        groupes = groupes.filter(annee_academique=annee_academique)
     return [
         # [V3.2] "sigleAffiche" porte la règle de préfixe ("UFR/SH" mais
         # "IBAM") : c'est ce que le visiteur lit au premier étage de la
         # cascade, l'écran où le vocabulaire compte le plus.
         {"id": u.id, "nom": u.nom, "sigle": u.sigle, "type": u.type, "sigleAffiche": u.sigle_affiche}
-        for u in Ufr.objects.filter(groupes__isnull=False).distinct().order_by("nom")
+        for u in Ufr.objects.filter(id__in=groupes.values("ufr_id")).distinct().order_by("nom")
     ]
 
 
-def list_departements(ufr_id: str) -> list[str]:
-    return sorted(
-        Groupe.objects.filter(ufr_id=ufr_id).values_list("departement", flat=True).distinct()
-    )
+def list_departements(ufr_id: str, annee_academique: str | None = None) -> list[str]:
+    groupes = Groupe.objects.filter(ufr_id=ufr_id)
+    if annee_academique:
+        groupes = groupes.filter(annee_academique=annee_academique)
+    return sorted(groupes.values_list("departement", flat=True).distinct())
 
 
-def list_niveaux(ufr_id: str, departement: str) -> list[str]:
-    return sorted(
-        Groupe.objects.filter(ufr_id=ufr_id, departement=departement).values_list("niveau", flat=True).distinct()
-    )
+def list_niveaux(ufr_id: str, departement: str, annee_academique: str | None = None) -> list[str]:
+    groupes = Groupe.objects.filter(ufr_id=ufr_id, departement=departement)
+    if annee_academique:
+        groupes = groupes.filter(annee_academique=annee_academique)
+    return sorted(groupes.values_list("niveau", flat=True).distinct())
 
 
-def list_groupes(ufr_id: str, departement: str, niveau: str) -> list[dict]:
+def list_groupes(ufr_id: str, departement: str, niveau: str, annee_academique: str | None = None) -> list[dict]:
     """Dernier étage de la cascade. Le nombre de créneaux accompagne chaque
     groupe pour que le visiteur distingue, AVANT de cliquer, un programme
     rempli d'un programme encore vide (ERR-07)."""
     from django.db.models import Count
 
-    groupes = (
-        Groupe.objects.filter(ufr_id=ufr_id, departement=departement, niveau=niveau)
-        .annotate(nb_creneaux=Count("creneaux"))
-        .order_by("nom")
-    )
+    groupes = Groupe.objects.filter(ufr_id=ufr_id, departement=departement, niveau=niveau)
+    if annee_academique:
+        groupes = groupes.filter(annee_academique=annee_academique)
+    groupes = groupes.annotate(nb_creneaux=Count("creneaux")).order_by("nom")
     return [
         {
             "id": g.id,
@@ -116,9 +130,9 @@ def _projeter_creneau(creneau: Creneau) -> dict:
         "jour": creneau.jour,
         "heureDebut": minutes_to_hhmm(creneau.heure_debut_minutes),
         "heureFin": minutes_to_hhmm(creneau.heure_fin_minutes),
-        "ue": {"code": creneau.ue.code, "intitule": creneau.ue.intitule, "niveau": creneau.ue.niveau},
+        "ue": {"code": creneau.ue.code, "intitule": creneau.ue.intitule},
         "enseignant": f"{creneau.enseignant.prenom} {creneau.enseignant.nom}".strip(),
-        "salle": {"nom": creneau.salle.nom, "batiment": creneau.salle.batiment},
+        "salle": {"nom": creneau.salle.nom},
         "statut": creneau.statut,
         "motif": creneau.motif,
     }

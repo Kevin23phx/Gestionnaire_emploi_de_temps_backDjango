@@ -21,7 +21,7 @@ from core.donnees_ujkz import ETABLISSEMENTS, NOMS_COMPLETS_A_CONFIRMER
 from core.models import Ufr
 from planning.models import ConflitJournal, Creneau
 from public.models import AbonnementAlerte
-from referentiel.models import Departement, Groupe, Salle, StructureGestionnaire, UniteEnseignement
+from referentiel.models import Departement, Groupe, Salle, UniteEnseignement
 
 hasher = PasswordHasher()
 
@@ -87,14 +87,14 @@ class Command(BaseCommand):
         ufr_pilote = "ufr-sea"
 
         self.stdout.write("Référentiel (UE, enseignants, salles, groupes)...")
-        ue_algo = UniteEnseignement.objects.create(code="INFO301", intitule="Algorithmique Avancée", niveau="L3", ufr_id=ufr_pilote)
-        ue_bdd = UniteEnseignement.objects.create(code="INFO302", intitule="Bases de Données (TP)", niveau="L3", ufr_id=ufr_pilote)
-        ue_reseaux = UniteEnseignement.objects.create(code="INFO303", intitule="Réseaux I", niveau="L3", ufr_id=ufr_pilote)
-        ue_prog_c = UniteEnseignement.objects.create(code="INFO201", intitule="Programmation C", niveau="L2", ufr_id=ufr_pilote)
+        ue_algo = UniteEnseignement.objects.create(code="INFO301", intitule="Algorithmique Avancée", ufr_id=ufr_pilote)
+        ue_bdd = UniteEnseignement.objects.create(code="INFO302", intitule="Bases de Données (TP)", ufr_id=ufr_pilote)
+        ue_reseaux = UniteEnseignement.objects.create(code="INFO303", intitule="Réseaux I", ufr_id=ufr_pilote)
+        ue_prog_c = UniteEnseignement.objects.create(code="INFO201", intitule="Programmation C", ufr_id=ufr_pilote)
         # [V3.3] Un cours mutualisé, pour que le cas « plusieurs départements »
         # soit visible dès la première ouverture de l'écran Cours.
         ue_maths = UniteEnseignement.objects.create(
-            code="SEA101", intitule="Mathématiques pour l'ingénieur", niveau="L1", ufr_id=ufr_pilote
+            code="SEA101", intitule="Mathématiques pour l'ingénieur", ufr_id=ufr_pilote
         )
 
         dep_sea = {d.libelle: d for d in Departement.objects.filter(ufr_id=ufr_pilote)}
@@ -115,13 +115,13 @@ class Command(BaseCommand):
         # créneaux ci-dessous.
         EnseignantUfr.objects.bulk_create([EnseignantUfr(enseignant=e, ufr_id=ufr_pilote) for e in [kabore, traore, sawadogo]])
 
-        amphi_a = Salle.objects.create(nom="Amphi A", batiment="Amphis Centraux", capacite=1000, type_usage="commune", ufr_id=ufr_pilote)
-        salle_102 = Salle.objects.create(nom="Salle 102", batiment="UFR/SEA", capacite=40, type_usage="propre", ufr_id=ufr_pilote)
-        Salle.objects.create(nom="Labo Info 1", batiment="UFR/SEA", capacite=30, type_usage="propre", ufr_id=ufr_pilote)
-        salle_402 = Salle.objects.create(nom="Salle 402", batiment="UFR/SEA", capacite=70, type_usage="propre", ufr_id=ufr_pilote)
+        amphi_a = Salle.objects.create(nom="Amphi A", capacite=1000, type_usage="cours")
+        salle_102 = Salle.objects.create(nom="Salle 102", capacite=40, type_usage="td")
+        Salle.objects.create(nom="Labo Info 1", capacite=30, type_usage="laboratoire")
+        salle_402 = Salle.objects.create(nom="Salle 402", capacite=70, type_usage="td")
         # Salle volontairement petite : démo de conflit de capacité contre
         # l'effectif saisi du Groupe A (8 étudiants).
-        salle_6 = Salle.objects.create(nom="Salle 6", batiment="UFR/SEA", capacite=6, type_usage="propre", ufr_id=ufr_pilote)
+        salle_6 = Salle.objects.create(nom="Salle 6", capacite=6, type_usage="td")
 
         # [V3.1] L'effectif est saisi, plus compté : il n'existe plus de
         # référentiel nominatif d'étudiants (voir referentiel/models.py).
@@ -137,9 +137,9 @@ class Command(BaseCommand):
         self.stdout.write("Autres établissements (données fictives pour observer le cloisonnement)...")
 
         # --- UFR-SVT ---
-        ue_bio_cell = UniteEnseignement.objects.create(code="SVT101", intitule="Biologie Cellulaire", niveau="L1", ufr_id="ufr-svt")
-        ue_geo_dyn = UniteEnseignement.objects.create(code="SVT102", intitule="Géodynamique Interne", niveau="L2", ufr_id="ufr-svt")
-        amphi_svt = Salle.objects.create(nom="Amphi SVT 1", batiment="UFR/SVT", capacite=120, type_usage="propre", ufr_id="ufr-svt")
+        ue_bio_cell = UniteEnseignement.objects.create(code="SVT101", intitule="Biologie Cellulaire", ufr_id="ufr-svt")
+        ue_geo_dyn = UniteEnseignement.objects.create(code="SVT102", intitule="Géodynamique Interne", ufr_id="ufr-svt")
+        amphi_svt = Salle.objects.create(nom="Amphi SVT 1", capacite=120, type_usage="cours")
         groupe_svt_l1 = Groupe.objects.create(nom="L1 SVT - Groupe A", departement="Biochimie et microbiologie", niveau="L1", annee_academique="2025-2026", effectif=95, ufr_id="ufr-svt")
         groupe_svt_l2 = Groupe.objects.create(nom="L2 Géologie", departement="Sciences de la Terre", niveau="L2", annee_academique="2024-2025", effectif=42, ufr_id="ufr-svt")
         # FR-REF-06 : Kaboré Ismaël (déjà enseignant à l'UFR-SEA) intervient
@@ -151,24 +151,24 @@ class Command(BaseCommand):
         Creneau.objects.create(ue=ue_geo_dyn, enseignant=kabore, groupe=groupe_svt_l2, salle=amphi_svt, date=jour("mardi"), heure_debut_minutes=10 * 60 + 15, heure_fin_minutes=12 * 60, statut="normal")
 
         # --- UFR-SH ---
-        ue_socio_gen = UniteEnseignement.objects.create(code="SH101", intitule="Sociologie Générale", niveau="L2", ufr_id="ufr-sh")
-        salle_sh = Salle.objects.create(nom="Salle 201", batiment="UFR/SH", capacite=60, type_usage="propre", ufr_id="ufr-sh")
+        ue_socio_gen = UniteEnseignement.objects.create(code="SH101", intitule="Sociologie Générale", ufr_id="ufr-sh")
+        salle_sh = Salle.objects.create(nom="Salle 201", capacite=60, type_usage="td")
         groupe_sh_l2 = Groupe.objects.create(nom="L2 Sociologie", departement="Sociologie", niveau="L2", annee_academique="2024-2025", effectif=58, ufr_id="ufr-sh")
         ens_sh = Enseignant.objects.create(nom="Compaoré", prenom="Elie")
         EnseignantUfr.objects.create(enseignant=ens_sh, ufr_id="ufr-sh")
         Creneau.objects.create(ue=ue_socio_gen, enseignant=ens_sh, groupe=groupe_sh_l2, salle=salle_sh, date=jour("mercredi"), heure_debut_minutes=8 * 60, heure_fin_minutes=10 * 60, statut="normal")
 
         # --- UFR-SDS ---
-        ue_anat = UniteEnseignement.objects.create(code="SDS101", intitule="Anatomie Générale", niveau="L1", ufr_id="ufr-sds")
-        salle_sds = Salle.objects.create(nom="Amphi Santé", batiment="UFR/SDS", capacite=150, type_usage="propre", ufr_id="ufr-sds")
+        ue_anat = UniteEnseignement.objects.create(code="SDS101", intitule="Anatomie Générale", ufr_id="ufr-sds")
+        salle_sds = Salle.objects.create(nom="Amphi Santé", capacite=150, type_usage="cours")
         groupe_sds_l1 = Groupe.objects.create(nom="L1 Médecine - Groupe A", departement="Medecine", niveau="L1", annee_academique="2025-2026", effectif=140, ufr_id="ufr-sds")
         ens_sds = Enseignant.objects.create(nom="Ilboudo", prenom="Salimata")
         EnseignantUfr.objects.create(enseignant=ens_sds, ufr_id="ufr-sds")
         Creneau.objects.create(ue=ue_anat, enseignant=ens_sds, groupe=groupe_sds_l1, salle=salle_sds, date=jour("jeudi"), heure_debut_minutes=8 * 60, heure_fin_minutes=10 * 60, statut="normal")
 
         # --- UFR-LAC ---
-        ue_lingu = UniteEnseignement.objects.create(code="LAC101", intitule="Linguistique Générale", niveau="L3", ufr_id="ufr-lac")
-        salle_lac = Salle.objects.create(nom="Salle 105", batiment="UFR/LAC", capacite=50, type_usage="propre", ufr_id="ufr-lac")
+        ue_lingu = UniteEnseignement.objects.create(code="LAC101", intitule="Linguistique Générale", ufr_id="ufr-lac")
+        salle_lac = Salle.objects.create(nom="Salle 105", capacite=50, type_usage="td")
         groupe_lac_l3 = Groupe.objects.create(nom="L3 Lettres Modernes", departement="Lettres Modernes (LM)", niveau="L3", annee_academique="2023-2024", effectif=35, ufr_id="ufr-lac")
         ens_lac = Enseignant.objects.create(nom="Ouédraogo", prenom="Fatimata")
         EnseignantUfr.objects.create(enseignant=ens_lac, ufr_id="ufr-lac")
@@ -195,13 +195,10 @@ class Command(BaseCommand):
             ue = UniteEnseignement.objects.create(
                 code=f"{sigle_court[:4]}101",
                 intitule=f"Introduction — {departement}",
-                niveau=niveau,
                 ufr_id=ufr_id,
             )
             ue.departements.set(Departement.objects.filter(ufr_id=ufr_id, libelle=departement))
-            salle = Salle.objects.create(
-                nom=f"Salle A — {sigle_court}", batiment=sigle_court, capacite=80, type_usage="propre", ufr_id=ufr_id
-            )
+            salle = Salle.objects.create(nom=f"Salle A — {sigle_court}", capacite=80, type_usage="cours")
             groupe = Groupe.objects.create(
                 nom=f"{niveau} {departement} - Groupe A",
                 departement=departement,
@@ -224,7 +221,7 @@ class Command(BaseCommand):
             )
 
         # --- Salle DEP (transversale) ---
-        Salle.objects.create(nom="Grand Amphithéâtre Central", batiment="Bâtiment Administratif", capacite=800, type_usage="commune", structure_gestionnaire=StructureGestionnaire.DEP, ufr=None)
+        Salle.objects.create(nom="Grand Amphithéâtre Central", capacite=800, type_usage="cours")
 
         self.stdout.write('Comptes de connexion (password: "password")...')
         # [V3] Plus aucun compte Étudiant ni Enseignant : le programme est
