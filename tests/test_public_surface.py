@@ -46,25 +46,51 @@ class SurfacePubliqueTests(TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(len(res.json()["seances"]), 1)
 
-    def test_la_cascade_ne_propose_que_des_valeurs_qui_menent_a_un_programme(self):
-        """FR-PUB-02 : une UFR sans aucun groupe n'apparaît pas — un visiteur
-        ne doit pas pouvoir s'engager dans un chemin qui ne mène nulle part."""
+    def test_la_cascade_propose_les_etablissements_meme_sans_programme_publie(self):
+        """[2026-09] Renversement assumé de l'ancienne règle FR-PUB-02 (« ne
+        proposer que ce qui mène à un programme »).
+
+        Un établissement dont la scolarité n'a encore rien saisi disparaissait
+        de la liste : le visiteur ne pouvait pas distinguer « cet
+        établissement n'existe pas » de « son programme n'est pas encore
+        publié ». Il le voit désormais, et c'est le dernier étage qui lui dit
+        où en est la publication."""
         sigles = [u["sigle"] for u in self.anonyme.get("/api/public/ufrs").json()["ufrs"]]
         self.assertIn("test", sigles)
-        self.assertNotIn("vide", sigles)
+        self.assertIn("vide", sigles)
 
-    def test_la_cascade_se_resserre_a_chaque_etage(self):
+    def test_les_niveaux_du_lmd_sont_proposes_meme_sans_groupe_saisi(self):
+        """[2026-09] L'exemple qui a motivé le changement : un étudiant de L1
+        ne voyait pas « L1 » tant qu'aucun groupe de L1 n'existait, alors que
+        seuls L2 et L3 avaient été saisis."""
         ufr = ufr_par_defaut()
-        departements = self.anonyme.get(f"/api/public/departements?ufrId={ufr}").json()["departements"]
-        self.assertEqual(departements, ["Informatique"])
-
         niveaux = self.anonyme.get(f"/api/public/niveaux?ufrId={ufr}&departement=Informatique").json()["niveaux"]
-        self.assertEqual(niveaux, ["L2", "L3"])
+        self.assertEqual(niveaux, ["L1", "L2", "L3", "M1", "M2"])
 
+    def test_une_combinaison_sans_programme_repond_une_liste_vide_et_non_une_erreur(self):
+        """La contrepartie du changement ci-dessus : le dernier étage doit
+        répondre normalement pour que l'écran puisse annoncer « pas encore
+        disponible » — pas planter, pas renvoyer une erreur."""
+        ufr = ufr_par_defaut()
+        reponse = self.anonyme.get(f"/api/public/groupes?ufrId={ufr}&departement=Informatique&niveau=M1")
+        self.assertEqual(reponse.status_code, 200)
+        self.assertEqual(reponse.json()["groupes"], [])
+
+    def test_le_dernier_etage_designe_toujours_un_programme_precis(self):
+        ufr = ufr_par_defaut()
         groupes = self.anonyme.get(
             f"/api/public/groupes?ufrId={ufr}&departement=Informatique&niveau=L3"
         ).json()["groupes"]
         self.assertEqual([g["id"] for g in groupes], [self.groupe.id])
+
+    def test_un_departement_porte_par_un_groupe_reste_propose(self):
+        """Le référentiel officiel des départements (FR-REF-20) alimente la
+        liste, mais un groupe antérieur à ce référentiel ne doit pas
+        disparaître de la cascade au prétexte que son libellé n'y figure
+        pas."""
+        ufr = ufr_par_defaut()
+        departements = self.anonyme.get(f"/api/public/departements?ufrId={ufr}").json()["departements"]
+        self.assertIn("Informatique", departements)
 
     def test_ufr_plus_niveau_ne_suffisent_pas_a_designer_un_programme(self):
         """RM-09 : justification de la cascade à 4 étages. Deux départements

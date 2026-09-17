@@ -13,9 +13,23 @@ from core.ufr_scope import resolve_ufr_scope, ufr_filter_kwargs
 from referentiel.models import Departement
 
 
-def list_departements(user, ufr_id_pour_admin: str | None = None):
+def list_departements(user, ufr_id_pour_admin: str | None = None, recherche: str | None = None):
+    """[2026-09] `recherche` filtre EN BASE, pas dans le navigateur.
+
+    Le filtrage se faisait côté client sur la liste complète : la requête
+    partait chercher tous les départements de l'établissement quel que soit
+    le terme saisi, et l'écran n'en gardait qu'une poignée. Le temps
+    d'attente ne dépendait donc pas de ce qu'on cherchait mais de la taille
+    du référentiel — l'inverse de ce qu'un filtre est censé faire.
+
+    `unaccent` avant `icontains`, comme partout ailleurs (FR-FILT-02) : sans
+    lui, « genie » ne trouverait pas « Génie logiciel ».
+    """
     scope = resolve_ufr_scope(user, ufr_id_pour_admin)
-    return Departement.objects.filter(**ufr_filter_kwargs(scope)).order_by("libelle")
+    qs = Departement.objects.filter(**ufr_filter_kwargs(scope))
+    if recherche and recherche.strip():
+        qs = qs.filter(libelle__unaccent__icontains=recherche.strip())
+    return qs.order_by("libelle")
 
 
 def create_departement(libelle: str, ufr_id: str) -> Departement:

@@ -19,7 +19,8 @@ from rest_framework.exceptions import NotFound, ValidationError
 from core.models import Ufr
 from core.time_utils import minutes_to_hhmm
 from planning.models import Creneau
-from referentiel.models import Groupe
+from referentiel.models import Departement, Groupe
+from referentiel.services.groupes import NIVEAUX
 
 JOURS_ORDRE = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"]
 JOURS_INDEX = {jour: i for i, jour in enumerate(JOURS_ORDRE)}
@@ -28,48 +29,77 @@ JOURS_INDEX = {jour: i for i, jour in enumerate(JOURS_ORDRE)}
 # ---------------------------------------------------------------------------
 # Cascade de sélection (FR-PUB-02)
 # ---------------------------------------------------------------------------
-# Chaque étage ne propose que des valeurs qui mènent réellement quelque part :
-# elles sont dérivées des groupes existants, jamais d'une liste écrite en dur.
-# C'est ce qui garantit qu'un visiteur ne peut pas construire une combinaison
-# vide en suivant l'interface — ERR-07 ne couvre alors que le cas d'un
-# programme réellement dépourvu de créneau.
+# [2026-09] Retour du porteur de projet : la cascade ne se limite PLUS à ce
+# qui mène à un programme existant.
+#
+# Jusqu'ici chaque étage n'exposait que les valeurs tirées des groupes déjà
+# créés. C'était défendable sur le papier (« on ne peut pas s'engager dans un
+# chemin vide »), mais à l'écran cela donnait ceci : un étudiant de L2 qui
+# vient chercher son emploi du temps ne voit même pas « L2 » dans la liste
+# tant que la scolarité ne l'a pas saisi. Il ne peut pas distinguer « ce
+# parcours n'existe pas » de « ce parcours n'est pas encore publié », et
+# l'interface ressemble à une liste trouée.
+#
+# Les étages proposent donc désormais le RÉFÉRENTIEL (les établissements,
+# les départements officiels, les niveaux du LMD, les années académiques
+# courantes), et c'est le dernier étage qui répond en toutes lettres quand la
+# combinaison choisie n'a pas encore de programme — cf. ERR-07, qui ne
+# couvrait jusque-là que le programme vide et couvre maintenant aussi la
+# combinaison sans groupe.
+
+
+def _annees_courantes(reference: datetime.date | None = None) -> list[str]:
+    """Les trois années académiques utiles : la précédente, la courante, la
+    suivante. Calculées et non écrites en dur, exactement comme côté
+    gestionnaire (web/src/lib/referentiel-options.ts) — une liste figée
+    deviendrait fausse en silence à la rentrée. L'année universitaire bascule
+    en août."""
+    reference = reference or datetime.date.today()
+    depart = reference.year if reference.month >= 8 else reference.year - 1
+    return [f"{depart + d}-{depart + d + 1}" for d in (-1, 0, 1)]
 
 
 def list_annees() -> list[str]:
-    """[2026-09] Retour des gestionnaires : premier étage de la cascade
-    publique — un visiteur choisit d'abord son année académique, avant même
-    son établissement. Triées la plus récente en premier : c'est celle
-    qu'un visiteur cherche le plus souvent."""
-    return sorted(
-        Groupe.objects.values_list("annee_academique", flat=True).distinct(), reverse=True
-    )
+    """[2026-09] Les années courantes, plus toute année déjà portée par un
+    groupe (une promotion archivée reste consultable). Triées la plus récente
+    en premier : c'est celle qu'un visiteur cherche le plus souvent."""
+    saisies = set(Groupe.objects.values_list("annee_academique", flat=True).distinct())
+    return sorted(saisies | set(_annees_courantes()), reverse=True)
 
 
 def list_ufrs(annee_academique: str | None = None) -> list[dict]:
-    groupes = Groupe.objects.all()
-    if annee_academique:
-        groupes = groupes.filter(annee_academique=annee_academique)
+    """[2026-09] Tous les établissements, y compris ceux dont aucun programme
+    n'est encore publié. `annee_academique` n'est plus un filtre : une UFR ne
+    cesse pas d'exister l'année où sa scolarité n'a rien saisi."""
     return [
         # [V3.2] "sigleAffiche" porte la règle de préfixe ("UFR/SH" mais
         # "IBAM") : c'est ce que le visiteur lit au premier étage de la
         # cascade, l'écran où le vocabulaire compte le plus.
         {"id": u.id, "nom": u.nom, "sigle": u.sigle, "type": u.type, "sigleAffiche": u.sigle_affiche}
-        for u in Ufr.objects.filter(id__in=groupes.values("ufr_id")).distinct().order_by("nom")
+        for u in Ufr.objects.all().order_by("nom")
     ]
 
 
 def list_departements(ufr_id: str, annee_academique: str | None = None) -> list[str]:
-    groupes = Groupe.objects.filter(ufr_id=ufr_id)
-    if annee_academique:
-        groupes = groupes.filter(annee_academique=annee_academique)
-    return sorted(groupes.values_list("departement", flat=True).distinct())
+    """[2026-09] Les départements OFFICIELS de l'établissement (FR-REF-20),
+    plus ceux que portent ses groupes — un groupe antérieur au référentiel
+    des départements ne doit pas disparaître de la cascade parce que son
+    libellé n'y figure pas encore."""
+    officiels = Departement.objects.filter(ufr_id=ufr_id).values_list("libelle", flat=True)
+    portes = Groupe.objects.filter(ufr_id=ufr_id).values_list("departement", flat=True).distinct()
+    return sorted({d for d in [*officiels, *portes] if d})
 
 
 def list_niveaux(ufr_id: str, departement: str, annee_academique: str | None = None) -> list[str]:
-    groupes = Groupe.objects.filter(ufr_id=ufr_id, departement=departement)
-    if annee_academique:
-        groupes = groupes.filter(annee_academique=annee_academique)
-    return sorted(groupes.values_list("niveau", flat=True).distinct())
+    """[2026-09] Les niveaux du LMD — liste close, la même pour toutes les
+    UFR (elle vient de referentiel.services.groupes, source de vérité) — plus
+    tout niveau déjà porté par un groupe de ce département."""
+    portes = (
+        Groupe.objects.filter(ufr_id=ufr_id, departement=departement)
+        .values_list("niveau", flat=True)
+        .distinct()
+    )
+    return sorted({n for n in [*NIVEAUX, *portes] if n})
 
 
 def list_groupes(ufr_id: str, departement: str, niveau: str, annee_academique: str | None = None) -> list[dict]:

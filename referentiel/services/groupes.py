@@ -12,6 +12,12 @@ from referentiel.models import Groupe
 # passage).
 NIVEAU_SUIVANT = {"L1": "L2", "L2": "L3", "M1": "M2"}
 
+# Les niveaux du cycle LMD — liste close, identique pour toutes les UFR
+# (pendant de NIVEAUX dans web/src/lib/referentiel-options.ts). Source de
+# vérité pour la cascade publique, qui les propose tous que la scolarité ait
+# saisi un programme ou non (cf. public/services.py).
+NIVEAUX = ["L1", "L2", "L3", "M1", "M2"]
+
 # [V3.1] "effectif" est une colonne saisie par le Gestionnaire, plus un
 # COUNT(Etudiant) : le référentiel nominatif des étudiants a été supprimé
 # (voir referentiel/models.py). Le moteur de conflits lit donc directement

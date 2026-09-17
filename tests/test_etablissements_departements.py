@@ -105,6 +105,33 @@ class DepartementsApiTests(TestCase):
         self.assertEqual(libelles, ["Informatique", "Mathématique"])
         self.assertNotIn("Démographie", libelles)
 
+    def test_la_recherche_filtre_en_base_et_ignore_les_accents(self):
+        """[2026-09] Le filtrage se faisait dans le navigateur sur la liste
+        complète : la requête ramenait tout le référentiel quel que soit le
+        terme cherché, et l'écran affichait brièvement des départements que
+        le filtre écartait. Le terme part désormais au serveur — `unaccent`
+        avant `icontains` (FR-FILT-02), sans quoi « mathematique » ne
+        trouverait pas « Mathématique »."""
+        libelles = [
+            d["libelle"]
+            for d in self.client_sco.get("/api/departements?recherche=mathematique").json()["departements"]
+        ]
+        self.assertEqual(libelles, ["Mathématique"])
+
+    def test_une_recherche_vide_ne_filtre_rien(self):
+        libelles = [
+            d["libelle"] for d in self.client_sco.get("/api/departements?recherche=   ").json()["departements"]
+        ]
+        self.assertEqual(libelles, ["Informatique", "Mathématique"])
+
+    def test_la_recherche_reste_bornee_a_l_etablissement_de_la_session(self):
+        """INT-07 : un filtre n'est pas une porte de sortie du périmètre."""
+        libelles = [
+            d["libelle"]
+            for d in self.client_sco.get("/api/departements?recherche=demographie").json()["departements"]
+        ]
+        self.assertEqual(libelles, [])
+
     def test_l_admin_voit_tous_les_departements(self):
         """FR-ADMIN-03."""
         libelles = [d["libelle"] for d in self.client_admin.get("/api/departements").json()["departements"]]

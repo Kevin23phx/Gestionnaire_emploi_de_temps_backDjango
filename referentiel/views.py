@@ -42,7 +42,11 @@ class DepartementsView(APIView):
         return super().get_permissions()  # IsAuthenticatedCM par défaut
 
     def get(self, request):
-        departements = departements_service.list_departements(request.user, request.query_params.get("ufrId"))
+        departements = departements_service.list_departements(
+            request.user,
+            request.query_params.get("ufrId"),
+            request.query_params.get("recherche"),
+        )
         return Response({"departements": DepartementSerializer(departements, many=True).data})
 
     def post(self, request):
