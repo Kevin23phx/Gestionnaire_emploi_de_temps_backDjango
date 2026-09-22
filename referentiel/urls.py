@@ -8,6 +8,8 @@ from referentiel.views import (
     GroupesPassageView,
     GroupesView,
     SallesView,
+    SpecialiteDetailView,
+    SpecialitesView,
 )
 
 # [V3.1] Les routes /etudiants ont été supprimées avec le référentiel
@@ -15,6 +17,10 @@ from referentiel.views import (
 # saisi (voir referentiel/models.py).
 urlpatterns = [
     path("api/departements", DepartementsView.as_view()),
+    # [V8] Spécialités — même forme que /departements : la liste et la
+    # création sur la collection, la suppression sur l'élément.
+    path("api/specialites", SpecialitesView.as_view()),
+    path("api/specialites/<str:specialite_id>", SpecialiteDetailView.as_view()),
     # [V6] "passage" AVANT "<str:groupe_id>" — sinon Django résout
     # /api/groupes/passage comme GroupeDetailView avec groupe_id="passage".
     path("api/groupes/passage", GroupesPassageView.as_view()),

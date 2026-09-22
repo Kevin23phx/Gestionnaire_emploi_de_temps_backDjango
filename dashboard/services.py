@@ -1,3 +1,5 @@
+import datetime
+
 from conflict_engine import services as conflict_engine
 from conflict_engine.constants import PAUSES
 from conflict_engine.types import CandidateCreneau
@@ -13,10 +15,10 @@ MINUTES_DISPONIBLES_PAR_SALLE_PAR_SEMAINE = JOURS_OUVRABLES * (
     HEURE_FERMETURE_MINUTES - HEURE_OUVERTURE_MINUTES - MINUTES_PAUSES
 )
 
-# FR-DASH-01. Limitation assumée : Creneau est un gabarit hebdomadaire
-# récurrent, sans date calendaire — "taux_occupation_salles" ignore donc le
-# filtre de période. Les 3 autres statistiques sont dérivées d'un signal
-# daté (AuditEntry.date_heure/ConflitJournal.detecte_le).
+# FR-DASH-01. [V4] Un créneau porte une date réelle : le taux d'occupation
+# se calcule donc sur la SEMAINE EN COURS — la même unité que son
+# dénominateur (la capacité d'une semaine). Les 3 autres statistiques sont
+# dérivées d'un signal daté (AuditEntry.date_heure/ConflitJournal.detecte_le).
 #
 # INT-07 (V2) : chaque statistique est calculée sur le seul périmètre UFR de
 # l'appelant (Gestionnaire : sa propre UFR ; Admin : tout ou une UFR choisie).
@@ -49,8 +51,14 @@ def _calculer_taux_occupation(scope) -> int:
     # entier, même pour le tableau de bord d'une seule UFR — cohérent avec
     # le fait qu'un Gestionnaire peut désormais utiliser n'importe quelle
     # salle, pas seulement celles "de son UFR".
+    # [V4] Semaine en cours uniquement. Avant, toutes les semaines publiées
+    # s'additionnaient pour être divisées par la capacité d'UNE semaine : le
+    # taux croissait à chaque publication, jusqu'à plafonner à 100 %.
+    lundi = datetime.date.today() - datetime.timedelta(days=datetime.date.today().weekday())
+    samedi = lundi + datetime.timedelta(days=5)
+
     salles_qs = Salle.objects.all()
-    creneaux_qs = Creneau.objects.exclude(statut="annule")
+    creneaux_qs = Creneau.objects.exclude(statut="annule").filter(date__gte=lundi, date__lte=samedi)
     if not scope.toutes:
         creneaux_qs = creneaux_qs.filter(groupe__ufr_id__in=scope.ufr_ids)
 
@@ -91,7 +99,10 @@ def _compter_resolus(conflits: list[ConflitJournal]) -> int:
     for c in creneaux:
         candidats_par_id[c.id] = CandidateCreneau(
             id=c.id,
-            jour=c.jour,
+            # [V4] `date`, plus `jour` : le candidat n'a plus de champ jour de
+            # semaine. L'ancien `jour=` levait une TypeError qui faisait
+            # planter toute la route dès qu'un conflit était journalisé.
+            date=c.date.isoformat(),
             heure_debut_minutes=c.heure_debut_minutes,
             heure_fin_minutes=c.heure_fin_minutes,
             statut=c.statut,

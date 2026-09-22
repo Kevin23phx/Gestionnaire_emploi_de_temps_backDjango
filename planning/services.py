@@ -61,6 +61,8 @@ def _denormaliser(creneau: Creneau, effectif: int) -> dict:
         "heureFin": minutes_to_hhmm(creneau.heure_fin_minutes),
         "statut": creneau.statut,
         "motif": creneau.motif,
+        # [V8.1] Spécialité affectée ; chaîne vide = tout le groupe.
+        "specialite": creneau.specialite,
         # [V3] Le numéro de révision voyage jusqu'au client : c'est lui qui
         # permet de savoir qu'un créneau affiché est périmé sans comparer
         # champ à champ.
@@ -173,6 +175,9 @@ def _charger_candidats(exclude_id: str | None = None) -> list[CandidateCreneau]:
             salle_id=c.salle_id,
             salle_nom=c.salle.nom,
             salle_capacite=c.salle.capacite,
+            # [V8.1] Sans elle, deux cours de spécialités différentes à la
+            # même heure se bloqueraient l'un l'autre — cf. `_memes_etudiants`.
+            specialite=c.specialite,
         )
         for c in creneaux
     ]
@@ -212,8 +217,24 @@ def _construire_candidat(item: dict, statut: str, heure_debut_minutes: int, heur
         salle_id=salle.id,
         salle_nom=salle.nom,
         salle_capacite=salle.capacite,
+        specialite=_specialite_de(item),
     )
     return candidat, {"ue_intitule": ue.intitule, "salle_nom": salle.nom}
+
+
+def _specialite_de(item: dict) -> str:
+    """[V8.1] Spécialité affectée au créneau, normalisée. Absente ou vide =
+    le créneau concerne tout le groupe.
+
+    Pas de vérification contre le référentiel des spécialités, délibérément,
+    et pour la même raison que `Groupe.departement` et `Groupe.specialite`
+    (FR-REF-34) : la valeur est choisie dans une liste déroulante alimentée
+    par ce référentiel, et un créneau doit pouvoir conserver une spécialité
+    que le Gestionnaire a refermée depuis. La cascade publique le prévoit —
+    elle propose aussi les spécialités effectivement portées, pas seulement
+    celles encore déclarées (public/services.py).
+    """
+    return (item.get("specialite") or "").strip()
 
 
 def _libelle_action(action: str) -> str:
@@ -291,6 +312,7 @@ def _ecrire_un(item: dict, auteur: str, contexte: list[CandidateCreneau], user=N
         heure_fin_minutes=heure_fin_minutes,
         statut=statut,
         motif=(item.get("motif") or "").strip() or None,
+        specialite=_specialite_de(item),
         derogation_motif=derogation_motif_a_ecrire,
     )
 

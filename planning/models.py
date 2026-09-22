@@ -77,6 +77,39 @@ class Creneau(models.Model):
     heure_debut_minutes = models.PositiveIntegerField()
     heure_fin_minutes = models.PositiveIntegerField()
 
+    # [V8.1, 2026-09-21] AFFECTATION du créneau à une spécialité.
+    #
+    # Vide = le créneau concerne TOUT le groupe (tronc commun). Renseignée =
+    # il ne concerne que les étudiants de cette spécialité-là.
+    #
+    # ## Pourquoi ici et pas sur le Groupe
+    #
+    # La V8 permettait déjà de porter une spécialité sur le Groupe, ce qui
+    # obligeait à créer autant de groupes que de spécialités — quatre « L2
+    # Médecine » là où la scolarité n'en voit qu'un. Chaque cours du tronc
+    # commun devait alors être ressaisi quatre fois, et une correction
+    # d'horaire appliquée quatre fois aussi. Retour du porteur de projet le
+    # 2026-09-21 : un groupe UNIQUE, et c'est le créneau qu'on affecte.
+    #
+    # C'est aussi la modélisation juste. Une promotion de L2 Médecine est
+    # une cohorte : elle a des cours communs à tous et des cours propres à
+    # chaque spécialité. Ce qui se spécialise, c'est l'ENSEIGNEMENT, pas la
+    # cohorte — la porter sur le groupe forçait à nier les cours communs.
+    #
+    # Chaîne dénormalisée, comme `Groupe.specialite` et pour la même raison
+    # (INV-21) : un créneau garde le libellé qu'avait sa spécialité le jour
+    # de sa saisie, même si le Gestionnaire la renomme ou la referme.
+    #
+    # ## Conséquence sur la détection de conflits
+    #
+    # Deux créneaux du même groupe au même moment cessaient d'être
+    # automatiquement un conflit : « Maths » et « Chimie » le mardi à 8h
+    # sont deux cours simultanés pour deux sous-populations disjointes. La
+    # règle est reprise dans conflict_engine/services.py — sans elle, le
+    # mécanisme serait inutilisable, chaque cours de spécialité bloquant
+    # tous les autres.
+    specialite = models.CharField(max_length=255, blank=True, default="")
+
     statut = models.CharField(max_length=16, choices=StatutCreneau.choices, default=StatutCreneau.NORMAL)
     motif = models.TextField(null=True, blank=True)
     derogation_motif = models.TextField(null=True, blank=True)
@@ -117,6 +150,10 @@ class Creneau(models.Model):
             # Le plus sollicité de tous : afficher le programme d'un groupe
             # pour une semaine donnée, côté public comme côté gestion.
             models.Index(fields=["groupe", "date"]),
+            # [V8.1] Le programme public d'une spécialité : (groupe, date)
+            # filtré sur la spécialité. Sans cet index, chaque consultation
+            # d'une L2 spécialisée relirait tous les créneaux du groupe.
+            models.Index(fields=["groupe", "specialite", "date"]),
         ]
         constraints = [
             # INT-03 : un créneau modifié/annulé sans motif est rejeté — la

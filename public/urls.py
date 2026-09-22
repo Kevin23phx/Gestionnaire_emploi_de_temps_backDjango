@@ -9,6 +9,7 @@ from public.views import (
     GroupesView,
     NiveauxView,
     ProgrammeView,
+    SpecialitesView,
     UfrsView,
 )
 
@@ -21,6 +22,7 @@ urlpatterns = [
     path("api/public/ufrs", UfrsView.as_view()),
     path("api/public/departements", DepartementsView.as_view()),
     path("api/public/niveaux", NiveauxView.as_view()),
+    path("api/public/specialites", SpecialitesView.as_view()),
     path("api/public/groupes", GroupesView.as_view()),
     path("api/public/programme/<str:groupe_id>", ProgrammeView.as_view()),
     # L'extension .ics dans l'URL : beaucoup de clients d'agenda refusent de

@@ -7,12 +7,14 @@ from referentiel.serializers import (
     DepartementSerializer,
     GroupeSerializer,
     SalleSerializer,
+    SpecialiteSerializer,
     UniteEnseignementSerializer,
 )
 from referentiel.services import cours as cours_service
 from referentiel.services import departements as departements_service
 from referentiel.services import groupes as groupes_service
 from referentiel.services import salles as salles_service
+from referentiel.services import specialites as specialites_service
 
 
 def _requis(data: dict, *champs: str) -> None:
@@ -60,6 +62,71 @@ class DepartementsView(APIView):
         return Response({"departement": DepartementSerializer(departement).data}, status=201)
 
 
+class SpecialitesView(APIView):
+    """[V8] FR-REF-33/34/35 — les spécialités qu'un département ouvre à un
+    niveau donné.
+
+    GET ouvert à tout compte authentifié (l'Admin en a besoin pour la
+    supervision, FR-ADMIN-03), comme pour les départements.
+
+    POST et DELETE réservés au Gestionnaire : contrairement aux départements
+    — dont l'Admin peut ouvrir une entrée quand le Gestionnaire n'est pas
+    disponible, parce qu'elles viennent d'un référentiel officiel commun —
+    une spécialité relève de l'organisation pédagogique interne du
+    département. L'Admin n'a aucun moyen de savoir que MPCI se scinde en
+    quatre en L2 ; seul le Gestionnaire de l'établissement le sait
+    (FR-ADMIN-04 : l'Admin ne décide pas du contenu pédagogique).
+    """
+
+    def get_permissions(self):
+        if self.request.method in ("POST", "DELETE"):
+            return [require_roles("scolarite")()]
+        return super().get_permissions()  # IsAuthenticatedCM par défaut
+
+    def get(self, request):
+        specialites = specialites_service.list_specialites(
+            request.user,
+            request.query_params.get("ufrId"),
+            request.query_params.get("departementId"),
+            request.query_params.get("niveau"),
+            request.query_params.get("recherche"),
+        )
+        return Response({"specialites": SpecialiteSerializer(specialites, many=True).data})
+
+    def post(self, request):
+        # [V8.1] "libelle" peut contenir PLUSIEURS spécialités séparées par
+        # des virgules — c'est ainsi qu'un Gestionnaire les énumère
+        # spontanément (« Médecine générale, Sciences du cerveau, Sciences
+        # des membres »), et la première version enregistrait toute la
+        # phrase comme un seul libellé. Le découpage se fait dans le
+        # service, côté serveur, et non seulement dans le navigateur.
+        _requis(request.data, "libelle", "departementId", "niveau")
+        resultat = specialites_service.create_specialites(
+            request.data["libelle"],
+            request.data["departementId"],
+            request.data["niveau"],
+            request.user,
+        )
+        # "doublons" accompagne la réponse : l'écran doit pouvoir dire « 2
+        # ajoutées, « Chimie » existait déjà » plutôt que de laisser croire
+        # que les trois sont passées.
+        return Response(
+            {
+                "specialites": SpecialiteSerializer(resultat["creees"], many=True).data,
+                "doublons": resultat["doublons"],
+            },
+            status=201,
+        )
+
+
+class SpecialiteDetailView(APIView):
+    permission_classes = [require_roles("scolarite")]
+
+    def delete(self, request, specialite_id: str):
+        specialites_service.supprimer_specialite(specialite_id, request.user)
+        return Response(status=204)
+
+
 class GroupesView(APIView):
     def get_permissions(self):
         if self.request.method == "POST":
@@ -82,6 +149,7 @@ class GroupesView(APIView):
             request.data["anneeAcademique"],
             request.data.get("effectif", 0),
             request.user.ufr_id,
+            request.data.get("specialite"),
         )
         return Response({"groupe": GroupeSerializer(groupe).data}, status=201)
 

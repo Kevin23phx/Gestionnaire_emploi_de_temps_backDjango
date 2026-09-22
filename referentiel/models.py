@@ -42,6 +42,20 @@ class Groupe(models.Model):
     # celui-ci est renommé ou fermé ensuite (cf. Departement, plus haut).
     departement = models.CharField(max_length=255)
     niveau = models.CharField(max_length=32)
+
+    # [V8] Spécialité suivie par ce groupe — vide quand le niveau n'en
+    # propose aucune. Chaîne dénormalisée et non une FK vers `Specialite`,
+    # exactement pour la même raison que `departement` juste au-dessus : le
+    # groupe garde le libellé qu'avait sa spécialité le jour de sa création,
+    # même si le Gestionnaire la renomme ou la ferme ensuite. Un emploi du
+    # temps de l'an dernier ne doit pas changer de nom rétroactivement.
+    #
+    # Vide par défaut, et jamais NULL : "pas de spécialité à ce niveau" et
+    # "spécialité pas encore renseignée" ne sont pas deux états différents
+    # ici — dans les deux cas le groupe n'en porte aucune, et une colonne
+    # nullable obligerait chaque lecture à traiter les deux cas.
+    specialite = models.CharField(max_length=255, blank=True, default="")
+
     annee_academique = models.CharField(max_length=16)
     effectif = models.PositiveIntegerField(default=0)
 
@@ -181,3 +195,83 @@ class Departement(models.Model):
 
     def __str__(self) -> str:
         return self.libelle
+
+
+class Specialite(models.Model):
+    """[V8, 2026-09-21] Spécialité ouverte par un département à un NIVEAU
+    donné — la « réforme des parcours » demandée par le chef de projet.
+
+    ## Ce qui change
+
+    Jusqu'ici l'écran disait « Parcours » pour désigner en réalité le niveau
+    du cycle LMD (L1…M2) : un seul mot pour deux notions, et aucune place
+    pour la troisième. Le vocabulaire est remis d'aplomb :
+
+    - **Niveau** = L1, L2, L3, M1, M2 — liste close, la même partout
+      (`referentiel.services.groupes.NIVEAUX`), jamais saisie.
+    - **Spécialité** = ce modèle — liste ouverte, créée par le Gestionnaire,
+      rattachée à un département ET à un niveau.
+
+    ## Pourquoi le rattachement porte sur le COUPLE (département, niveau)
+
+    C'est le cas MPCI qui l'impose, et c'est précisément l'exemple donné par
+    le chef de projet : en L1, MPCI est un tronc commun sans aucun choix ;
+    c'est en L2 que l'étudiant se répartit entre Mathématiques, Physique,
+    Chimie et Informatique. Rattacher la spécialité au seul département
+    ferait apparaître ces quatre choix dès la L1, où ils n'existent pas.
+
+    Ce n'est pas une particularité locale : la recherche menée le
+    2026-09-21 sur les licences « portail » (MPCI à Aix-Marseille, MPCSI à
+    Lille, MPMEI à Brest) montre le même schéma partout — une première
+    année pluridisciplinaire commune, puis une spécialisation progressive.
+    Le niveau est donc constitutif de l'existence de la spécialité, pas une
+    simple propriété de celle-ci.
+
+    ## Pourquoi une entité, et pas une colonne libre sur Groupe
+
+    Même raisonnement que `Departement` (FR-REF-22) : une chaîne libre
+    ressaisie à chaque groupe redeviendrait un référentiel de qualité
+    décroissante — « Informatique », « informatique » et « Info » feraient
+    trois spécialités dans la cascade publique, face auxquelles l'étudiant
+    ne saurait pas laquelle est la sienne. C'est le Gestionnaire qui déclare
+    la spécialité une fois ; les groupes la sélectionnent ensuite.
+
+    Pas de FK vers `Ufr` : l'établissement se lit par `departement.ufr`. Le
+    dupliquer ouvrirait la porte à l'incohérence (une spécialité rattachée à
+    l'UFR/SEA via un département de l'UFR/SDS), exactement ce que
+    `Ufr.sigle_affiche` évite déjà en se calculant plutôt qu'en se stockant.
+    """
+
+    id = models.CharField(primary_key=True, max_length=64, default=generate_id, editable=False)
+    departement = models.ForeignKey(
+        "referentiel.Departement", related_name="specialites", on_delete=models.CASCADE
+    )
+    # Volontairement une CharField libre et non un TextChoices : `NIVEAUX`
+    # vit dans referentiel/services/groupes.py, d'où le reste du projet le
+    # lit déjà (cascade publique, passage d'année). Le dupliquer en choices
+    # ici obligerait à une migration le jour où le cycle évolue, pour une
+    # valeur que le service valide déjà à l'entrée.
+    niveau = models.CharField(max_length=32)
+    libelle = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "specialite"
+        ordering = ["libelle"]
+        indexes = [models.Index(fields=["departement", "niveau"])]
+        constraints = [
+            # Insensible à la casse, comme pour Departement : « Informatique »
+            # et « informatique » sont la même spécialité, et c'est ce
+            # doublon-là que ce modèle existe pour empêcher.
+            #
+            # Scopée au COUPLE (département, niveau) et non au seul
+            # département : « Informatique » peut légitimement exister en L2
+            # et en L3 du même département — ce sont deux choix distincts
+            # offerts à deux cohortes distinctes, pas un doublon.
+            models.UniqueConstraint(
+                "departement", "niveau", Lower("libelle"), name="specialite_libelle_dep_niveau_unique"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.libelle} ({self.niveau})"

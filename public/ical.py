@@ -38,7 +38,7 @@ import datetime
 
 from core.time_utils import minutes_to_hhmm  # noqa: F401  (lisibilité des logs de debug)
 from planning.models import Creneau
-from public.services import get_groupe_public
+from public.services import filtre_specialite, get_groupe_public
 
 PRODID = "-//UJKZ//Campus Manager//FR"
 TZID = "Africa/Ouagadougou"
@@ -190,7 +190,25 @@ def _fantome_deplacement(creneau: Creneau, aujourdhui: datetime.date) -> list[st
     ] + _alarme(f"Cours déplacé : {creneau.ue.intitule}") + ["END:VEVENT"]
 
 
-def calendrier_du_groupe(groupe_id: str) -> str:
+def _nom_calendrier(groupe, ufr, specialite: str | None) -> str:
+    retenue = (specialite or "").strip() or groupe.specialite
+    if retenue:
+        return f"{groupe.nom} — {retenue} — {ufr.sigle_affiche}"
+    return f"{groupe.nom} — {ufr.sigle_affiche}"
+
+
+def calendrier_du_groupe(groupe_id: str, specialite: str | None = None) -> str:
+    """[V8.1] `specialite` restreint le flux aux cours de cette spécialité
+    **plus les cours communs** (même règle que le programme web, voir
+    `filtre_specialite` dans public/services.py).
+
+    L'adresse d'abonnement en dépend donc, et c'est délibéré : deux
+    étudiants de la même promotion mais de spécialités différentes n'ont
+    pas le même emploi du temps, ils ne peuvent pas partager un flux. Le
+    paramètre fait partie de l'URL, donc de l'abonnement — INV-13 (adresse
+    stable) reste tenu : c'est toujours la même adresse qui est servie tant
+    que l'étudiant ne change pas de spécialité, et un changement de
+    spécialité est bien un changement de programme."""
     groupe = get_groupe_public(groupe_id)
     ufr = groupe.ufr
 
@@ -203,10 +221,12 @@ def calendrier_du_groupe(groupe_id: str) -> str:
     aujourdhui = datetime.date.today()
     debut = aujourdhui - datetime.timedelta(days=30)
 
-    creneaux = (
-        Creneau.objects.filter(groupe_id=groupe_id, date__gte=debut)
-        .select_related("ue", "enseignant", "salle", "groupe")
-        .order_by("date", "heure_debut_minutes")
+    creneaux = Creneau.objects.filter(groupe_id=groupe_id, date__gte=debut)
+    filtre = filtre_specialite(specialite)
+    if filtre is not None:
+        creneaux = creneaux.filter(filtre)
+    creneaux = creneaux.select_related("ue", "enseignant", "salle", "groupe").order_by(
+        "date", "heure_debut_minutes"
     )
 
     lignes = [
@@ -217,7 +237,9 @@ def calendrier_du_groupe(groupe_id: str) -> str:
         "METHOD:PUBLISH",
         # Le nom que le visiteur verra dans son agenda pour le restant de
         # l'année : le sigle officiel, pas le code technique en minuscules.
-        f"X-WR-CALNAME:{_echapper(f'{groupe.nom} — {ufr.sigle_affiche}')}",
+        # [V8.1] La spécialité entre dans le nom : un étudiant abonné à
+        # deux flux « L2 Médecine » ne saurait pas lequel est le sien.
+        f"X-WR-CALNAME:{_echapper(_nom_calendrier(groupe, ufr, specialite))}",
         f"X-WR-TIMEZONE:{TZID}",
         # Respectés par Apple Calendrier et Outlook ; Google applique son
         # propre rythme quoi qu'on écrive ici (cf. en-tête de module).

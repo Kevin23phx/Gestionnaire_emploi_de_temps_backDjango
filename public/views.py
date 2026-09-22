@@ -70,11 +70,33 @@ class NiveauxView(APIView):
         )
 
 
+class SpecialitesView(APIView):
+    """[V8] Cinquième étage de la cascade. Peut légitimement renvoyer une
+    liste vide : cela signifie que ce niveau ne propose aucun choix de
+    spécialité (cf. public/services.py)."""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        _requis(request.query_params, "ufrId", "departement", "niveau")
+        return Response(
+            {
+                "specialites": services.list_specialites(
+                    request.query_params["ufrId"],
+                    request.query_params["departement"],
+                    request.query_params["niveau"],
+                )
+            }
+        )
+
+
 class GroupesView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
         _requis(request.query_params, "ufrId", "departement", "niveau")
+        # "specialite" n'est PAS dans _requis : un niveau sans spécialité
+        # n'en fournit aucune, et c'est le cas normal en L1.
         return Response(
             {
                 "groupes": services.list_groupes(
@@ -82,6 +104,7 @@ class GroupesView(APIView):
                     request.query_params["departement"],
                     request.query_params["niveau"],
                     request.query_params.get("anneeAcademique"),
+                    request.query_params.get("specialite"),
                 )
             }
         )
@@ -91,14 +114,23 @@ class ProgrammeView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request, groupe_id: str):
-        return Response(services.programme_semaine(groupe_id, request.query_params.get("semaine")))
+        # [V8.1] "specialite" facultatif : absent = programme complet du
+        # groupe, toutes spécialités confondues (cas d'un tronc commun, ou
+        # d'un favori enregistré avant l'affectation par créneau).
+        return Response(
+            services.programme_semaine(
+                groupe_id,
+                request.query_params.get("semaine"),
+                request.query_params.get("specialite"),
+            )
+        )
 
 
 class CalendrierView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request, groupe_id: str):
-        contenu = ical.calendrier_du_groupe(groupe_id)
+        contenu = ical.calendrier_du_groupe(groupe_id, request.query_params.get("specialite"))
         reponse = HttpResponse(contenu, content_type="text/calendar; charset=utf-8")
         # Un abonnement n'est pas un téléchargement : pas de
         # Content-Disposition attachment, qui ferait proposer au visiteur

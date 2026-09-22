@@ -23,6 +23,20 @@ class CandidateCreneau:
     salle_nom: str
     salle_capacite: int
 
+    # [V8.1] Spécialité à laquelle ce créneau est affecté ; vide = tout le
+    # groupe. Elle entre dans la comparaison de conflit « groupe » — voir
+    # `_memes_etudiants` dans services.py.
+    #
+    # EN DERNIER, et pas à côté des autres champs du groupe où sa place
+    # logique serait : un champ à valeur par défaut ne peut pas précéder un
+    # champ qui n'en a pas dans une dataclass (Python lève à l'import).
+    #
+    # Un défaut vide signifie « concerne tout le groupe », c'est-à-dire
+    # exactement le comportement d'avant la V8.1. Un appelant qui oublierait
+    # l'argument retrouve donc l'ancienne règle, la plus stricte : il fait
+    # détecter un conflit de trop, jamais un conflit de moins.
+    specialite: str = ""
+
 
 @dataclass
 class ConflitDetecteResult:

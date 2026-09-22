@@ -53,7 +53,23 @@ def _valider_effectif(effectif) -> int:
     return valeur
 
 
-def create_groupe(nom: str, departement: str, niveau: str, annee_academique: str, effectif, ufr_id: str) -> Groupe:
+def create_groupe(
+    nom: str,
+    departement: str,
+    niveau: str,
+    annee_academique: str,
+    effectif,
+    ufr_id: str,
+    specialite: str | None = None,
+) -> Groupe:
+    """[V8] `specialite` est facultative et le restera : tous les niveaux
+    n'en proposent pas (une L1 de portail est un tronc commun), et la rendre
+    obligatoire bloquerait la création de ces groupes-là. Elle n'est pas
+    vérifiée contre le référentiel des spécialités ici : le Gestionnaire la
+    choisit dans une liste déroulante alimentée par ce référentiel, et un
+    groupe créé avant l'ouverture d'une spécialité doit pouvoir garder la
+    sienne — même raisonnement que pour `departement`, qui n'est pas non
+    plus une FK."""
     nom_trim = nom.strip()
     annee_trim = annee_academique.strip()
     # [V6] Scopée par année : "L1 Médecine - Groupe A" doit pouvoir exister
@@ -66,6 +82,7 @@ def create_groupe(nom: str, departement: str, niveau: str, annee_academique: str
         nom=nom_trim,
         departement=departement.strip(),
         niveau=niveau.strip(),
+        specialite=(specialite or "").strip(),
         annee_academique=annee_trim,
         effectif=_valider_effectif(effectif),
         ufr_id=ufr_id,
@@ -95,7 +112,16 @@ def update_groupe(groupe_id: str, donnees: dict, user) -> Groupe:
             raise Conflict("Un groupe porte déjà ce nom pour cette année académique.")
         groupe.nom = nom_trim
         champs.append("nom")
-    for champ, cle in (("departement", "departement"), ("niveau", "niveau"), ("annee_academique", "anneeAcademique")):
+    # [V8] "specialite" est dans la liste : un groupe peut avoir été créé
+    # avant que sa spécialité n'existe au référentiel, ou s'être trompé de
+    # choix — c'est le seul moyen de le corriger sans recréer le groupe (et
+    # donc sans perdre son programme).
+    for champ, cle in (
+        ("departement", "departement"),
+        ("niveau", "niveau"),
+        ("specialite", "specialite"),
+        ("annee_academique", "anneeAcademique"),
+    ):
         if cle in donnees:
             setattr(groupe, champ, (donnees[cle] or "").strip())
             champs.append(champ)
@@ -178,6 +204,16 @@ def promouvoir_groupes(items: list[dict], annee_cible: str, user) -> list[Groupe
                     nom=nom,
                     departement=groupe.departement,
                     niveau=niveau_cible,
+                    # [V8] Reprise de la spécialité du groupe source, mais
+                    # MODIFIABLE par le Gestionnaire dans la même requête —
+                    # et c'est tout l'intérêt : le passage d'année est
+                    # précisément le moment où une cohorte de portail se
+                    # scinde (une L1 MPCI sans spécialité devient plusieurs
+                    # L2 Maths / Physique / Chimie / Informatique). Reporter
+                    # la valeur source sans permettre de la changer aurait
+                    # rendu le mécanisme inutilisable pour ce cas, qui est
+                    # justement celui qui a motivé la réforme.
+                    specialite=(item.get("specialite") or groupe.specialite or "").strip(),
                     annee_academique=annee_cible,
                     effectif=_valider_effectif(item.get("effectif", groupe.effectif)),
                     ufr_id=groupe.ufr_id,

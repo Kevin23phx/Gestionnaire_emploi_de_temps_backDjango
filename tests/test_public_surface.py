@@ -116,10 +116,36 @@ class SurfacePubliqueTests(TestCase):
         # information d'emploi du temps (INV-12).
         self.assertNotIn("effectif", brut)
 
+        # La liste blanche, écrite en toutes lettres. Ce test échoue dès
+        # qu'un champ s'ajoute à la projection publique, et c'est sa raison
+        # d'être : l'ajout doit être un acte conscient, jamais un effet de
+        # bord d'une évolution du modèle (INV-12, cf. l'en-tête de
+        # public/services.py).
+        #
+        # [V8.1] « specialite » ajoutée après délibération : elle nomme une
+        # branche d'enseignement (« Informatique », « Chimie »), pas une
+        # personne ni une appartenance nominative. Elle est déjà publique
+        # par nature — c'est un étage de la cascade de recherche
+        # (FR-PUB-02), donc une information que le visiteur a lui-même
+        # saisie pour arriver ici. Et elle est nécessaire : sans elle,
+        # l'étudiant ne distingue pas sur sa feuille un cours de tronc
+        # commun d'un cours de sa spécialité.
         seance = json.loads(brut)["seances"][0]
         self.assertEqual(
             sorted(seance.keys()),
-            ["date", "enseignant", "heureDebut", "heureFin", "id", "jour", "motif", "salle", "statut", "ue"],
+            [
+                "date",
+                "enseignant",
+                "heureDebut",
+                "heureFin",
+                "id",
+                "jour",
+                "motif",
+                "salle",
+                "specialite",
+                "statut",
+                "ue",
+            ],
         )
 
     def test_les_referentiels_restent_fermes_aux_appels_anonymes(self):
