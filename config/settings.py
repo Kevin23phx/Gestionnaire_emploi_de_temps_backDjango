@@ -56,10 +56,36 @@ if not DEBUG and SECRET_KEY.strip() in SECRETS_D_EXEMPLE:
 # (même raison que pour CORS, plus bas). En production, la liste vient de
 # l'environnement : un `Host:` forgé ne peut alors plus servir à empoisonner
 # un lien de réinitialisation ou un cache.
+def _nom_d_hote(valeur: str) -> str:
+    """Extrait un nom d'hôte de ce qui a été saisi, URL comprise.
+
+    ALLOWED_HOSTS attend un hôte NU (« exemple.onrender.com ») tandis que
+    ALLOWED_ORIGIN, juste à côté dans la même page de configuration, attend
+    une URL COMPLÈTE (« https://exemple.pages.dev »). Confondre les deux est
+    l'erreur naturelle, et elle est particulièrement traître : le démarrage
+    réussit — la liste n'est pas vide — puis Django rejette *toutes* les
+    requêtes avec « Invalid HTTP_HOST header », parce qu'un navigateur
+    n'envoie jamais le schéma dans l'en-tête `Host`.
+
+    On normalise donc au lieu de refuser : l'intention est sans ambiguïté, et
+    un déploiement ne doit pas échouer sur une subtilité de format. Le port
+    est retiré aussi — Django compare l'hôte seul.
+    """
+    hote = valeur.strip()
+    if "//" in hote:
+        hote = hote.split("//", 1)[1]
+    hote = hote.split("/", 1)[0]
+    # IPv6 littéral entre crochets : garder les crochets, ne pas couper sur
+    # les deux-points qui séparent ses groupes.
+    if not hote.startswith("[") and ":" in hote:
+        hote = hote.rsplit(":", 1)[0]
+    return hote
+
+
 ALLOWED_HOSTS = (
     ["*"]
     if DEBUG
-    else [h.strip() for h in os.environ.get("ALLOWED_HOSTS", "").split(",") if h.strip()]
+    else [h for h in (_nom_d_hote(v) for v in os.environ.get("ALLOWED_HOSTS", "").split(",")) if h]
 )
 if not DEBUG and not ALLOWED_HOSTS:
     raise ImproperlyConfigured(
