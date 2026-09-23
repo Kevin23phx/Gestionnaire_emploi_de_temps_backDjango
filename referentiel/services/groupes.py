@@ -213,7 +213,18 @@ def promouvoir_groupes(items: list[dict], annee_cible: str, user) -> list[Groupe
                     # la valeur source sans permettre de la changer aurait
                     # rendu le mécanisme inutilisable pour ce cas, qui est
                     # justement celui qui a motivé la réforme.
-                    specialite=(item.get("specialite") or groupe.specialite or "").strip(),
+                    # [V8.6] `item.get(...) or ""` et NON `or groupe.specialite` :
+                    # le repli sur la source contredisait FR-REF-36, qui
+                    # interdit de reporter la spécialité du groupe promu.
+                    #
+                    # Le défaut était invisible parce qu'il fallait le bon
+                    # concours de circonstances : le front envoie toujours la
+                    # clé, mais avec une chaîne VIDE quand le Gestionnaire n'a
+                    # rien choisi — et `"" or x` vaut `x` en Python. Promouvoir
+                    # une L1 déjà rattachée à une spécialité en laissant le
+                    # champ sur « Aucune » recopiait donc silencieusement
+                    # l'ancienne, à l'inverse de ce que l'écran promettait.
+                    specialite=(item.get("specialite") or "").strip(),
                     annee_academique=annee_cible,
                     effectif=_valider_effectif(item.get("effectif", groupe.effectif)),
                     ufr_id=groupe.ufr_id,

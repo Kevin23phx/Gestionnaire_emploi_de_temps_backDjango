@@ -379,3 +379,51 @@ class SaisieMultipleTests(TestCase):
             Client().get(f"/api/public/specialites?{params}").json()["specialites"],
             ["Médecine générale", "Sciences des membres", "Sciences du cerveau"],
         )
+
+
+class PassageSpecialiteNonReporteeTests(TestCase):
+    """[V8.6] FR-REF-36 — la spécialité du groupe SOURCE ne se reporte jamais.
+
+    Régression trouvée le 2026-09-23 en relisant le code : le service
+    écrivait `item.get("specialite") or groupe.specialite`, et comme le
+    front envoie toujours la clé — vide quand le Gestionnaire n'a rien
+    choisi — `"" or x` valait `x`. Une L1 rattachée à une spécialité,
+    promue en laissant le champ sur « Aucune », emportait donc l'ancienne.
+
+    Le test précédent ne l'attrapait pas : il fournissait une spécialité
+    cible explicite, donc le repli ne se déclenchait jamais.
+    """
+
+    def setUp(self):
+        self.ufr = ufr_par_defaut()
+        creer_compte("scolarite.test", "Ouedraogo", "Awa", Role.SCOLARITE, ufr_id=self.ufr)
+        self.client = Client()
+        login(self.client, "scolarite.test")
+
+        self.source = creer_groupe("L1 MPCI", departement="MPCI", niveau="L1", annee_academique="2026-2027")
+        Groupe.objects.filter(id=self.source.id).update(specialite="Tronc commun scientifique")
+
+    def _promouvoir(self, item_extra: dict):
+        return post_json(
+            self.client,
+            "/api/groupes/passage",
+            {
+                "anneeAcademiqueCible": "2027-2028",
+                "groupes": [{"id": self.source.id, "nom": "L2 MPCI", "effectif": 30, **item_extra}],
+            },
+        )
+
+    def test_une_specialite_vide_ne_recopie_pas_celle_de_la_source(self):
+        reponse = self._promouvoir({"specialite": ""})
+        self.assertEqual(reponse.status_code, 201)
+        self.assertEqual(reponse.json()["groupes"][0]["specialite"], "")
+
+    def test_une_specialite_absente_ne_recopie_pas_non_plus(self):
+        """Un appel qui omet complètement la clé — script, client ancien."""
+        reponse = self._promouvoir({})
+        self.assertEqual(reponse.status_code, 201)
+        self.assertEqual(reponse.json()["groupes"][0]["specialite"], "")
+
+    def test_la_specialite_cible_choisie_est_bien_enregistree(self):
+        reponse = self._promouvoir({"specialite": "Informatique"})
+        self.assertEqual(reponse.json()["groupes"][0]["specialite"], "Informatique")

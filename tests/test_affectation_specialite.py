@@ -26,6 +26,7 @@ from django.test import Client, TestCase
 
 from accounts.models import Role
 from planning.models import Creneau
+from public.models import AbonnementAlerte
 from referentiel.models import Departement, Specialite
 from tests.base import (
     creer_compte,
@@ -268,3 +269,64 @@ class ProgrammePublicSpecialiteTests(TestCase):
         self.assertIn("Algorithmique", contenu)
         self.assertIn("Anatomie générale", contenu)
         self.assertNotIn("Chimie organique", contenu)
+
+
+class AlertesSpecialiteTests(TestCase):
+    """[V8.7] Les alertes push suivent la même règle que les deux autres
+    canaux.
+
+    Trouvé le 2026-09-23 en inventoriant les incohérences : `AbonnementAlerte`
+    datait de la V3 et ne connaissait que le groupe. Le programme web et le
+    flux agenda étaient filtrés par spécialité depuis la V8.1, pas les
+    notifications — un étudiant de Chimie était prévenu quand un cours
+    d'Informatique changeait de salle, et finissait par couper les alertes.
+    """
+
+    def setUp(self):
+        self.ufr = ufr_par_defaut()
+        self.groupe = creer_groupe("L2 Médecine", departement="Médecine", niveau="L2")
+        self.client = Client()
+
+    def _abonner(self, endpoint: str, specialite: str = ""):
+        corps = {
+            "groupeId": self.groupe.id,
+            "abonnement": {"endpoint": endpoint, "keys": {"p256dh": "cle-p", "auth": "cle-a"}},
+        }
+        if specialite:
+            corps["specialite"] = specialite
+        return post_json(self.client, "/api/public/alertes", corps)
+
+    def _destinataires(self, specialite_creneau: str) -> set[str]:
+        from public.diffusion import _abonnes
+
+        return {a.endpoint for a in _abonnes([self.groupe.id], specialite_creneau)}
+
+    def test_un_cours_de_specialite_ne_previent_que_les_siens(self):
+        self._abonner("appareil-info", "Informatique")
+        self._abonner("appareil-chimie", "Chimie")
+        self.assertEqual(self._destinataires("Informatique"), {"appareil-info"})
+
+    def test_un_cours_commun_previent_tout_le_monde(self):
+        self._abonner("appareil-info", "Informatique")
+        self._abonner("appareil-chimie", "Chimie")
+        self.assertEqual(self._destinataires(""), {"appareil-info", "appareil-chimie"})
+
+    def test_un_abonne_sans_specialite_recoit_tout(self):
+        """Il suit le groupe entier — c'était le seul comportement possible
+        avant la réforme, il reste valable."""
+        self._abonner("appareil-tout")
+        self.assertEqual(self._destinataires("Chimie"), {"appareil-tout"})
+        self.assertEqual(self._destinataires(""), {"appareil-tout"})
+
+    def test_la_casse_ne_separe_pas_deux_abonnes_de_la_meme_specialite(self):
+        self._abonner("appareil-info", "informatique")
+        self.assertEqual(self._destinataires("Informatique"), {"appareil-info"})
+
+    def test_se_reabonner_a_une_autre_specialite_remplace_la_precedente(self):
+        """Un appareil suit une spécialité, pas deux — comme pour les
+        favoris."""
+        self._abonner("appareil", "Informatique")
+        self._abonner("appareil", "Chimie")
+        self.assertEqual(AbonnementAlerte.objects.filter(groupe=self.groupe).count(), 1)
+        self.assertEqual(self._destinataires("Chimie"), {"appareil"})
+        self.assertEqual(self._destinataires("Informatique"), set())

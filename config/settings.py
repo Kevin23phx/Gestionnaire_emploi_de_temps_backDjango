@@ -17,15 +17,55 @@ from datetime import timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 load_dotenv(BASE_DIR / (os.environ.get("ENV_FILE") or ".env"))
 
+# [V8.8] OWASP A05 « Security Misconfiguration » — les trois réglages
+# ci-dessous avaient des défauts commodes en développement et dangereux en
+# production. Un déploiement se fait toujours dans la précipitation, et un
+# oubli de variable d'environnement ne doit JAMAIS ouvrir le système : le
+# défaut est donc désormais le réglage sûr, et c'est le développement qui
+# doit s'annoncer explicitement.
+# Toutes les valeurs d'amorçage connues, pas seulement celle du code : le
+# gabarit `.env.example` en propose une autre, et c'est précisément celle
+# qu'un déploiement pressé recopie sans la changer.
+SECRETS_D_EXEMPLE = {"dev-only-not-for-production", "change-me-in-production", ""}
 SECRET_KEY = os.environ.get("SECRET_KEY", "dev-only-not-for-production")
-DEBUG = os.environ.get("DEBUG", "true").lower() == "true"
-ALLOWED_HOSTS = ["*"]
+
+# Défaut "false" et non "true" : DEBUG=true en production expose la trace
+# complète des exceptions, le contenu des réglages et les requêtes SQL à
+# quiconque provoque une erreur. Oublier la variable donne maintenant un
+# serveur muet, pas un serveur bavard.
+DEBUG = os.environ.get("DEBUG", "false").lower() == "true"
+
+# Le serveur refuse de démarrer en production avec la clé d'exemple. Un
+# avertissement n'aurait rien changé : personne ne lit les logs de
+# démarrage d'un déploiement qui a réussi.
+if not DEBUG and SECRET_KEY.strip() in SECRETS_D_EXEMPLE:
+    raise ImproperlyConfigured(
+        "SECRET_KEY n'est pas défini alors que DEBUG=false. Renseignez une valeur "
+        "secrète et unique avant de démarrer en production."
+    )
+
+# ALLOWED_HOSTS ouvert en développement seulement — l'appareil qui teste
+# depuis le réseau local a une IP attribuée par DHCP, impossible à figer
+# (même raison que pour CORS, plus bas). En production, la liste vient de
+# l'environnement : un `Host:` forgé ne peut alors plus servir à empoisonner
+# un lien de réinitialisation ou un cache.
+ALLOWED_HOSTS = (
+    ["*"]
+    if DEBUG
+    else [h.strip() for h in os.environ.get("ALLOWED_HOSTS", "").split(",") if h.strip()]
+)
+if not DEBUG and not ALLOWED_HOSTS:
+    raise ImproperlyConfigured(
+        "ALLOWED_HOSTS est vide alors que DEBUG=false. Renseignez les domaines servis "
+        "(séparés par des virgules), par exemple « campus.ujkz.bf »."
+    )
 
 INSTALLED_APPS = [
     "django.contrib.contenttypes",
@@ -51,8 +91,17 @@ INSTALLED_APPS = [
 # le même choix que le backend NestJS (pas de CSRF token requis par le
 # frontend actuel, cf. web/src/lib/api.ts).
 MIDDLEWARE = [
+    # [V8.8] SecurityMiddleware manquait : sans lui, AUCUN des réglages
+    # `SECURE_*` ci-dessous n'a d'effet — ils sont posés par ce middleware
+    # et par personne d'autre. Placé en premier pour que ses en-têtes
+    # accompagnent aussi les réponses court-circuitées par CORS.
+    "django.middleware.security.SecurityMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
+    # [V8.8] X_FRAME_OPTIONS n'est PAS posé par SecurityMiddleware — il a son
+    # propre middleware, et sans lui le réglage ne produit aucun en-tête.
+    # Constaté par les tests : le réglage était là, l'en-tête absent.
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -141,6 +190,40 @@ if DEBUG:
     ]
 
 # ---------------------------------------------------------------------------
+# [V8.8] En-têtes de sécurité HTTP (OWASP A05).
+# ---------------------------------------------------------------------------
+# L'API ne sert que du JSON, ce qui limite la portée de certains en-têtes —
+# mais pas leur utilité : une réponse JSON interprétée comme du HTML par un
+# navigateur trop serviable reste un vecteur de XSS, et une API encadrable
+# reste un vecteur de clickjacking pour qui sait s'en servir.
+
+# Empêche le navigateur de « deviner » un type différent de celui déclaré.
+SECURE_CONTENT_TYPE_NOSNIFF = True
+
+# Aucune page de ce backend n'a vocation à être affichée dans un cadre.
+X_FRAME_OPTIONS = "DENY"
+
+# Ne fuiter l'adresse complète d'origine qu'à nous-mêmes : un lien sortant
+# ne doit pas emporter les paramètres de la page consultée.
+SECURE_REFERRER_POLICY = "same-origin"
+
+# HSTS : uniquement en production, et jamais en développement où il
+# rendrait `http://localhost` inaccessible pour des mois dans le navigateur
+# du développeur — un dégât difficile à diagnostiquer et pénible à défaire.
+#
+# `includeSubDomains` sans `preload` : la préinscription est irréversible à
+# court terme, elle se décide, elle ne se subit pas au détour d'un réglage.
+if not DEBUG:
+    SECURE_HSTS_SECONDS = int(os.environ.get("HSTS_SECONDS", 60 * 60 * 24 * 365))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = False
+    # Render/Cloudflare terminent TLS en amont et transmettent le protocole
+    # d'origine dans cet en-tête ; sans ce réglage, Django croit recevoir du
+    # HTTP en clair et redirigerait en boucle.
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SECURE_SSL_REDIRECT = os.environ.get("SSL_REDIRECT", "true").lower() == "true"
+
+# ---------------------------------------------------------------------------
 # Session applicative (accounts.models.Session) — pas django.contrib.sessions.
 # ---------------------------------------------------------------------------
 SESSION_COOKIE_NAME = "cm_session"
@@ -155,6 +238,21 @@ SESSION_COOKIE_SECURE = not DEBUG
 SESSION_COOKIE_SAMESITE = "Lax" if DEBUG else "None"
 
 # ---------------------------------------------------------------------------
+# [V8.8] Limitation de débit sur l'authentification (OWASP A07).
+# ---------------------------------------------------------------------------
+# Les quotas sont volontairement bas : un humain qui se connecte tape son
+# mot de passe une à trois fois, pas dix. Les valeurs restent réglables par
+# variable d'environnement pour qu'un incident en production puisse être
+# absorbé sans redéploiement — jamais pour les désactiver.
+#
+# Voir accounts/throttling.py pour le raisonnement complet et la limite
+# connue (cache par processus).
+THROTTLE_CONNEXION_IP = os.environ.get("THROTTLE_CONNEXION_IP", "10/min")
+THROTTLE_CONNEXION_COMPTE = os.environ.get("THROTTLE_CONNEXION_COMPTE", "5/min")
+THROTTLE_ACTIVATION = os.environ.get("THROTTLE_ACTIVATION", "5/min")
+THROTTLE_MOT_DE_PASSE = os.environ.get("THROTTLE_MOT_DE_PASSE", "5/min")
+
+# ---------------------------------------------------------------------------
 # Django REST Framework — authentification et gestion d'erreurs qui
 # reproduisent exactement le contrat NestJS ({erreur: "<message>"} partout,
 # jamais {detail: ...} par défaut de DRF).
@@ -166,6 +264,17 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],
     "UNAUTHENTICATED_USER": None,
+    # [V8.8] Aucune limite PAR DÉFAUT : l'immense majorité des routes est
+    # déjà fermée par `IsAuthenticatedCM`, et brider un Gestionnaire qui
+    # saisit un emploi du temps à la chaîne ferait plus de mal que de bien.
+    # Les limites sont déclarées vue par vue, là où elles protègent quelque
+    # chose — les portes d'entrée (accounts/auth_views.py).
+    "DEFAULT_THROTTLE_RATES": {
+        "connexion_ip": THROTTLE_CONNEXION_IP,
+        "connexion_compte": THROTTLE_CONNEXION_COMPTE,
+        "activation": THROTTLE_ACTIVATION,
+        "mot_de_passe": THROTTLE_MOT_DE_PASSE,
+    },
 }
 
 # [V3] Canal d'alerte Web Push (FR-PUB-08). "console" par défaut : sans

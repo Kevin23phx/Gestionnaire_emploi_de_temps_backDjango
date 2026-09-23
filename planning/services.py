@@ -353,6 +353,9 @@ def _ecrire_un(item: dict, auteur: str, contexte: list[CandidateCreneau], user=N
         salle_changee=salle_changee,
         groupe_id=item["groupeId"],
         groupe_id_precedent=ancien_groupe_id,
+        # [V8.7] Sans elle, tous les abonnés du groupe étaient prévenus,
+        # y compris ceux d'une autre spécialité.
+        specialite=_specialite_de(item),
     )
 
     return creneau_id

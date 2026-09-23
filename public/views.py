@@ -180,7 +180,13 @@ class AlertesView(APIView):
         AbonnementAlerte.objects.update_or_create(
             groupe_id=groupe_id,
             endpoint=endpoint,
-            defaults={"cle_p256dh": cles["p256dh"], "cle_auth": cles["auth"]},
+            defaults={
+                "cle_p256dh": cles["p256dh"],
+                "cle_auth": cles["auth"],
+                # [V8.7] Facultative : un visiteur qui suit un groupe sans
+                # spécialité reçoit tout, comme avant.
+                "specialite": (request.data.get("specialite") or "").strip(),
+            },
         )
         return Response(status=201)
 

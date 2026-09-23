@@ -29,6 +29,22 @@ class AbonnementAlerte(models.Model):
     endpoint = models.TextField()
     cle_p256dh = models.CharField(max_length=255)
     cle_auth = models.CharField(max_length=255)
+
+    # [V8.7] Spécialité suivie par cet appareil ; vide = toute la promotion.
+    #
+    # Le modèle datait de la V3, quand un groupe était indivisible. Depuis
+    # que le créneau porte une affectation (V8.1), s'en tenir au groupe
+    # rendait ce canal incohérent avec les deux autres : le programme web
+    # et le flux agenda sont filtrés par spécialité, pas les alertes. Un
+    # étudiant en « science du cerveau » recevait donc une notification
+    # quand un cours de « médecine générale » changeait de salle — et à
+    # terme il coupe les alertes, donc rate celle qui le concernait.
+    #
+    # Pas de changement de la contrainte d'unicité : elle reste sur
+    # (groupe, endpoint), donc UN abonnement par appareil et par groupe.
+    # S'abonner à une autre spécialité remplace le précédent, exactement
+    # comme pour les favoris — un étudiant suit une spécialité, pas deux.
+    specialite = models.CharField(max_length=255, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

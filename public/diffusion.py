@@ -86,11 +86,33 @@ def _envoyer(abonnements, charge: dict) -> None:
         logger.info("Alerte « %s » remise à %s destinataire(s)", charge["titre"], envoyees)
 
 
-def _abonnes(groupe_ids: list[str]):
+def _concerne(abonnement, specialite_creneau: str) -> bool:
+    """[V8.7] Cet abonné doit-il être prévenu de ce changement ?
+
+    Même règle que partout ailleurs depuis la V8.1 — et c'est le point :
+    les trois canaux (programme web, flux agenda, alertes) doivent répondre
+    la même chose, sinon l'étudiant reçoit une alerte pour un cours qu'il
+    ne voit pas dans son emploi du temps.
+
+    - le cours n'a pas de spécialité → il concerne toute la promotion,
+      donc tout le monde ;
+    - l'abonné n'en a pas choisi → il suit le groupe entier, donc tout ;
+    - les deux en ont une → seulement si c'est la même.
+    """
+    if not specialite_creneau or not abonnement.specialite:
+        return True
+    return abonnement.specialite.casefold() == specialite_creneau.casefold()
+
+
+def _abonnes(groupe_ids: list[str], specialite_creneau: str = ""):
     ids = [g for g in groupe_ids if g]
     if not ids:
         return []
-    return list(AbonnementAlerte.objects.filter(groupe_id__in=ids))
+    return [
+        a
+        for a in AbonnementAlerte.objects.filter(groupe_id__in=ids)
+        if _concerne(a, specialite_creneau)
+    ]
 
 
 def on_creneau_changed(
@@ -105,6 +127,7 @@ def on_creneau_changed(
     salle_changee: bool,
     groupe_id: str,
     groupe_id_precedent: str | None = None,
+    specialite: str = "",
 ) -> None:
     plage = f"{date} {heure_debut}-{heure_fin}"
     if action == "annulation":
@@ -123,6 +146,6 @@ def on_creneau_changed(
     # groupe : ses abonnés viennent de perdre un cours sans que rien n'ait
     # bougé de leur côté.
     _envoyer(
-        _abonnes([groupe_id, groupe_id_precedent]),
+        _abonnes([groupe_id, groupe_id_precedent], specialite),
         {"titre": titre, "corps": corps, "groupeId": groupe_id, "creneauId": creneau_id},
     )

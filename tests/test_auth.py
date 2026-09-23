@@ -56,12 +56,12 @@ class AuthTests(TestCase):
         res = post_json(
             self.client,
             "/api/auth/activate",
-            {"identifiant": "scolarite.nouveau", "nouveauMotDePasse": "mon-mdp", "confirmationMotDePasse": "mon-mdp"},
+            {"identifiant": "scolarite.nouveau", "nouveauMotDePasse": "mon-mot-de-passe", "confirmationMotDePasse": "mon-mot-de-passe"},
         )
         self.assertEqual(res.status_code, 200)
 
         client2 = Client()
-        res2 = login(client2, "scolarite.nouveau", "mon-mdp")
+        res2 = login(client2, "scolarite.nouveau", "mon-mot-de-passe")
         self.assertEqual(res2.status_code, 200)
 
     def test_activation_deux_fois_est_refusee(self):
@@ -69,6 +69,6 @@ class AuthTests(TestCase):
         res = post_json(
             self.client,
             "/api/auth/activate",
-            {"identifiant": "scolarite.test", "nouveauMotDePasse": "autre", "confirmationMotDePasse": "autre"},
+            {"identifiant": "scolarite.test", "nouveauMotDePasse": "un-autre-mot-de-passe", "confirmationMotDePasse": "un-autre-mot-de-passe"},
         )
         self.assertEqual(res.status_code, 400)
