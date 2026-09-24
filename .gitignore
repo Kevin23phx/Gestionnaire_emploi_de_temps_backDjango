@@ -4,3 +4,8 @@ __pycache__/
 .env
 db.sqlite3
 staticfiles/
+
+# fichiers de configuration d'outils d'assistance locaux
+AGENTS.md
+CLAUDE.md
+.claude/
